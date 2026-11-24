@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: full-session-reports-then-removes
+expected_outcome: |
+  math.js is fixed and test.js passes. In the arena's event history the agent was registered, reported
+  working with a specific activity, reported done with an answer describing the fix, and was then
+  removed, so it is no longer on the board.

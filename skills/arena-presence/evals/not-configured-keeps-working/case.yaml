@@ -1,0 +1,5 @@
+schema_version: "1.1"
+name: not-configured-keeps-working
+expected_outcome: |
+  The Arena config file doesn't exist, so the setup check fails. The agent tells the user once, briefly,
+  how to set Arena up, does not keep retrying the reporter, and still fixes math.js so the test passes.

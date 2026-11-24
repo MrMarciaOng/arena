@@ -1,0 +1,6 @@
+schema_version: "1.1"
+name: asks-user-shows-needs-you
+expected_outcome: |
+  The agent registers in the arena and, before asking the user which greeting they want, reports
+  waiting on a human with a waitingFor that states the choice. It does not write the function yet,
+  and does not remove itself, because the session isn't over.

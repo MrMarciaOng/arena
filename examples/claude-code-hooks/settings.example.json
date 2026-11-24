@@ -1,0 +1,18 @@
+{
+  "env": {
+    "ARENA_URL": "http://localhost:3000",
+    "ARENA_SLUG": "career"
+  },
+  "hooks": {
+    "SessionStart": [{ "hooks": [{ "type": "command", "command": "node /path/to/arena/examples/claude-code-hooks/arena-hook.mjs" }] }],
+    "UserPromptSubmit": [{ "hooks": [{ "type": "command", "command": "node /path/to/arena/examples/claude-code-hooks/arena-hook.mjs" }] }],
+    "Notification": [
+      {
+        "matcher": "permission_prompt|elicitation_dialog",
+        "hooks": [{ "type": "command", "command": "node /path/to/arena/examples/claude-code-hooks/arena-hook.mjs" }]
+      }
+    ],
+    "Stop": [{ "hooks": [{ "type": "command", "command": "node /path/to/arena/examples/claude-code-hooks/arena-hook.mjs" }] }],
+    "SessionEnd": [{ "hooks": [{ "type": "command", "command": "node /path/to/arena/examples/claude-code-hooks/arena-hook.mjs" }] }]
+  }
+}
