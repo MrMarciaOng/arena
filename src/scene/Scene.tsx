@@ -42,6 +42,11 @@ function useFitScale(baseWidth: number, interactive: boolean) {
 }
 
 const WALK_MS = 900;
+const ROOM_DESTINATIONS: Record<ThemeId, readonly [string, string]> = {
+  office: ["Workstations", "Coffee corner"],
+  kitchen: ["Prep stations", "Kitchen pass"],
+};
+const roomJumpButton = "min-h-11 rounded border border-line bg-panel-2 px-2 text-sm text-text hover:border-muted focus-visible:outline-2 focus-visible:outline-done";
 
 const BUBBLE: Record<BubbleKind, { text: string; color: string }> = {
   dots: { text: "…", color: "var(--color-waiting)" },
@@ -219,7 +224,18 @@ export function Scene({
   const theme = LAYOUTS[themeId];
   const reducedMotion = useReducedMotion();
   const { ref, scale, canPan } = useFitScale(theme.width, interactive);
+  const roomId = useId();
   const panHintId = useId();
+  const [stationsLabel, waitingLabel] = ROOM_DESTINATIONS[themeId];
+
+  function panTo(destination: "stations" | "waiting") {
+    const room = ref.current;
+    if (!room) return;
+    room.scrollTo({
+      left: destination === "stations" ? 0 : room.scrollWidth - room.clientWidth,
+      behavior: reducedMotion ? "instant" : "smooth",
+    });
+  }
 
   const highestSeat = Math.max(theme.seats.length - 1, ...agents.map((a) => a.seat));
   const height = sceneHeight(theme, highestSeat);
@@ -232,7 +248,23 @@ export function Scene({
 
   return (
     <>
+      {canPan ? (
+        <div className="grid gap-2 p-2">
+          <p id={panHintId} className="text-xs text-muted">
+            Swipe or scroll sideways to see the whole room.
+          </p>
+          <div role="group" aria-label="Room navigation" className="grid grid-cols-2 gap-2">
+            <button type="button" aria-controls={roomId} className={roomJumpButton} onClick={() => panTo("stations")}>
+              <span aria-hidden>← </span>{stationsLabel}
+            </button>
+            <button type="button" aria-controls={roomId} className={roomJumpButton} onClick={() => panTo("waiting")}>
+              {waitingLabel}<span aria-hidden> →</span>
+            </button>
+          </div>
+        </div>
+      ) : null}
       <div
+        id={roomId}
         ref={ref}
         className={interactive ? "scene-scroll" : "w-full overflow-hidden"}
         tabIndex={canPan ? 0 : undefined}
@@ -306,11 +338,6 @@ export function Scene({
           </div>
         </div>
       </div>
-      {canPan ? (
-        <p id={panHintId} className="px-2 py-1.5 text-xs text-muted">
-          Swipe or scroll sideways to see the whole room.
-        </p>
-      ) : null}
     </>
   );
 }

@@ -50,3 +50,57 @@ test("search and status filters follow live reports without changing the scene o
   await expect(status).toHaveValue("all");
   await expect(roster.locator("[data-agent]")).toHaveCount(3);
 });
+
+test("narrow rooms support jumps to both destinations and keep their position through live reports", async ({ page, request }) => {
+  const rooms = [
+    { theme: "office", name: "Office", stations: "Workstations", waiting: "Coffee corner" },
+    { theme: "kitchen", name: "Kitchen", stations: "Prep stations", waiting: "Kitchen pass" },
+  ];
+  for (const { theme } of rooms) {
+    await createArena(request, `small-${theme}`, theme);
+    await report(request, `small-${theme}`, "runner", { status: "working", displayName: "Runner" });
+    await report(request, `small-${theme}`, "first", { status: "waiting", displayName: "First" });
+    await report(request, `small-${theme}`, "second", { status: "waiting", displayName: "Second" });
+  }
+  await page.setViewportSize({ width: 390, height: 850 });
+  await page.emulateMedia({ reducedMotion: "reduce" });
+  await login(page);
+  await expect(page.getByRole("group", { name: "Room navigation" })).toHaveCount(0);
+
+  for (const { theme, name, stations, waiting } of rooms) {
+    await page.setViewportSize({ width: 390, height: 850 });
+    await page.goto(`/arenas/small-${theme}`);
+    const room = page.getByRole("region", { name: `${name} workspace` });
+    const navigation = page.getByRole("group", { name: "Room navigation" });
+    const toWaiting = navigation.getByRole("button", { name: waiting, exact: true });
+    const toStations = navigation.getByRole("button", { name: stations, exact: true });
+    const scrollLeft = () => room.evaluate((el) => el.scrollLeft);
+    const max = await room.evaluate((el) => el.scrollWidth - el.clientWidth);
+    expect(max).toBeGreaterThan(0);
+    const pageScroll = await page.evaluate(() => window.scrollY);
+    await toWaiting.focus();
+    await page.keyboard.press("Enter");
+    expect(await scrollLeft()).toBe(max);
+    await expect(toWaiting).toBeFocused();
+    expect(await page.evaluate(() => window.scrollY)).toBe(pageScroll);
+    await report(request, `small-${theme}`, "runner", { status: "working", activity: "Packing up" });
+    await expect(room.getByRole("button", { name: /Runner.*Packing up/ })).toHaveCount(1);
+    expect(await scrollLeft()).toBe(max);
+
+    const farAgent = room.getByRole("button", { name: /^Second:/ });
+    await expect(farAgent).toBeInViewport();
+    await farAgent.click();
+    const drawer = page.getByRole("complementary", { name: "Second details" });
+    await expect(drawer).toBeVisible();
+    await drawer.getByRole("button", { name: "Close" }).click();
+    await toStations.click();
+    expect(await scrollLeft()).toBe(0);
+    await room.hover();
+    await page.mouse.wheel(80, 0);
+    await expect.poll(scrollLeft).toBeGreaterThan(0);
+
+    await page.setViewportSize({ width: 1024, height: 850 });
+    await expect(navigation).toHaveCount(0);
+    await expect(page.getByText("Swipe or scroll sideways to see the whole room.")).toHaveCount(0);
+  }
+});
