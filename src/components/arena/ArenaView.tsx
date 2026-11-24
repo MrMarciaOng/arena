@@ -1,15 +1,17 @@
 "use client";
 
 import Link from "next/link";
-import { useMemo, useState } from "react";
-import { countAgents } from "@/lib/domain";
+import { useMemo, useRef, useState } from "react";
+import { countAgents, GROUPS, groupOf, type Group } from "@/lib/domain";
 import { agentsOf } from "@/lib/live-state";
 import { Scene } from "@/scene/Scene";
 import { useLiveStream, useNow } from "../live/useLiveStream";
-import { CountChips } from "../status";
+import { CountChips, GROUP_LABEL } from "../status";
 import { AgentDrawer } from "./AgentDrawer";
 import { AgentList } from "./AgentList";
 import { ConnectionDot } from "./ConnectionDot";
+
+const filterField = "h-9 min-w-0 rounded border border-line bg-ink px-2 text-sm text-text";
 
 export function ArenaView({ slug }: { slug: string }) {
   const arenas = useMemo(() => [slug], [slug]);
@@ -17,10 +19,28 @@ export function ArenaView({ slug }: { slug: string }) {
   const nowMs = useNow(5000, live.clockOffsetMs);
   const [selectedKey, setSelectedKey] = useState<string | null>(null);
   const [view, setView] = useState<"scene" | "list">("scene");
+  const [search, setSearch] = useState("");
+  const [statusFilter, setStatusFilter] = useState<Group | "all">("all");
+  const searchInput = useRef<HTMLInputElement>(null);
+  const rosterList = useRef<HTMLDivElement>(null);
 
   const arena = Object.values(live.arenas).find((a) => a.slug === slug) ?? null;
   const agents = arena ? agentsOf(live, arena.id) : [];
   const selected = selectedKey ? (agents.find((a) => a.key === selectedKey) ?? null) : null;
+  const isScene = view === "scene";
+  const query = search.trim().toLowerCase();
+  const filtering = search.length > 0 || statusFilter !== "all";
+  const matching = agents.filter((agent) =>
+    (statusFilter === "all" || groupOf(agent) === statusFilter) &&
+    (!query || [agent.displayName, agent.key, agent.role].some((value) => value?.toLowerCase().includes(query))),
+  );
+
+  function clearFilters() {
+    setSearch("");
+    setStatusFilter("all");
+    rosterList.current?.scrollTo({ top: 0 });
+    searchInput.current?.focus();
+  }
 
   if (live.connection === "failed") {
     return <p className="font-pixel text-error">Can&apos;t load this arena.</p>;
@@ -69,8 +89,8 @@ export function ArenaView({ slug }: { slug: string }) {
         </div>
       </div>
       <CountChips counts={countAgents(agents, nowMs)} />
-      {view === "scene" ? (
-        <div className="grid min-w-0 gap-4 min-[1150px]:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_330px]">
+      <div className={isScene ? "grid min-w-0 gap-4 min-[1150px]:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_330px]" : undefined}>
+        {isScene ? (
           <div className="workspace-frame min-w-0 self-start">
             <Scene
               themeId={arena.theme}
@@ -80,23 +100,59 @@ export function ArenaView({ slug }: { slug: string }) {
               onSelect={setSelectedKey}
             />
           </div>
-          <aside className="workspace-agents min-w-0" aria-label="Agents">
-            <div className="workspace-agents-content">
-              <div className="mb-4 flex shrink-0 items-center justify-between gap-2 border-b border-line pb-3">
+        ) : null}
+        <aside className={isScene ? "workspace-agents min-w-0" : "pixel-panel p-4"} aria-label="Agents">
+          <div className={isScene ? "workspace-agents-content" : undefined}>
+            <div className="mb-4 shrink-0 border-b border-line pb-3">
+              <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <h2 className="font-pixel text-xl">Agents</h2>
-                <span className="text-sm tabular-nums text-muted">{agents.length}</span>
+                <span role="status" className="ml-auto text-xs tabular-nums text-muted">
+                  {filtering ? `${matching.length} of ${agents.length} agents` : agents.length}
+                </span>
               </div>
-              <div className="workspace-agents-list">
-                <AgentList agents={agents} nowMs={nowMs} selectedKey={selectedKey} onSelect={setSelectedKey} />
+              <div className="mt-3 grid max-w-md grid-cols-[minmax(0,1fr)_7.25rem] gap-2">
+                <input
+                  ref={searchInput}
+                  type="search"
+                  aria-label="Search agents"
+                  placeholder="Find agents"
+                  className={filterField}
+                  value={search}
+                  onChange={(event) => {
+                    setSearch(event.currentTarget.value);
+                    rosterList.current?.scrollTo({ top: 0 });
+                  }}
+                />
+                <select
+                  aria-label="Agent status"
+                  className={filterField}
+                  value={statusFilter}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value;
+                    setStatusFilter(GROUPS.find((group) => group === value) ?? "all");
+                    rosterList.current?.scrollTo({ top: 0 });
+                  }}
+                >
+                  <option value="all">All statuses</option>
+                  {GROUPS.map((group) => <option key={group} value={group}>{GROUP_LABEL[group]}</option>)}
+                </select>
               </div>
+              {filtering ? (
+                <button type="button" onClick={clearFilters} className="mt-2 text-xs text-muted underline underline-offset-4 hover:text-text">
+                  Clear filters
+                </button>
+              ) : null}
             </div>
-          </aside>
-        </div>
-      ) : (
-        <div className="pixel-panel p-4">
-          <AgentList agents={agents} nowMs={nowMs} selectedKey={selectedKey} onSelect={setSelectedKey} />
-        </div>
-      )}
+            <div ref={rosterList} className={isScene ? "workspace-agents-list" : undefined}>
+              {agents.length > 0 && matching.length === 0 ? (
+                <p className="text-sm text-muted">No agents match these filters.</p>
+              ) : (
+                <AgentList agents={matching} nowMs={nowMs} selectedKey={selectedKey} onSelect={setSelectedKey} />
+              )}
+            </div>
+          </div>
+        </aside>
+      </div>
       {selected ? (
         <AgentDrawer key={selected.id} slug={slug} agent={selected} nowMs={nowMs} onClose={() => setSelectedKey(null)} />
       ) : null}

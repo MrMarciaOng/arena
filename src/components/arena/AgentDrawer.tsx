@@ -80,7 +80,10 @@ export function AgentDrawer({
 
   // Keyboard: move focus into the drawer on open, back to whatever opened it on close; Escape closes.
   useEffect(() => {
-    const opener = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+    const drawer = closeButton.current?.closest("aside");
+    const scope = drawer?.closest("[data-arena-view]");
+    const active = document.activeElement;
+    const opener = active instanceof HTMLElement && scope?.contains(active) ? active : null;
     closeButton.current?.focus();
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCloseRef.current();
@@ -88,11 +91,11 @@ export function AgentDrawer({
     document.addEventListener("keydown", onKey);
     const agentKey = opener?.getAttribute("data-agent") ?? opener?.getAttribute("data-agent-sprite");
     const attr = opener?.hasAttribute("data-agent") ? "data-agent" : "data-agent-sprite";
-    // Next keeps earlier pages in the DOM (hidden); only look inside this arena's view.
-    const scope = opener?.closest("[data-arena-view]") ?? null;
     return () => {
       document.removeEventListener("keydown", onKey);
-      if (opener?.isConnected) {
+      const focused = document.activeElement;
+      if (focused && scope?.contains(focused) && !drawer?.contains(focused)) return;
+      if (opener?.isConnected && opener.getClientRects().length > 0) {
         opener.focus();
         return;
       }
@@ -105,8 +108,12 @@ export function AgentDrawer({
         const target =
           scope.querySelector<HTMLElement>(`button[${attr}="${CSS.escape(agentKey)}"]`) ??
           scope.querySelector<HTMLElement>(`button[${other}="${CSS.escape(agentKey)}"]`);
-        target?.focus();
+        if (target?.getClientRects().length) {
+          target.focus();
+          return;
+        }
       }
+      scope?.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
     };
   }, []);
 
