@@ -71,6 +71,7 @@ export function AgentDrawer({
   const { detail, error: loadError, load } = useAgentDetail(slug, agent.id, agent.key, agent.version, agent.lastSeenAt);
   const [pinned, setPinned] = useState<ShownAnswer | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [linkCopy, setLinkCopy] = useState<{ href: string; copied: boolean } | null>(null);
   const [pending, startTransition] = useTransition();
   const closeButton = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
@@ -161,20 +162,46 @@ export function AgentDrawer({
     );
   };
 
+  async function copyAgentLink() {
+    const url = new URL(window.location.href);
+    url.searchParams.set("agent", agent.key);
+    setLinkCopy({ href: url.href, copied: await copyText(url.href) });
+  }
+
   return (
     <aside
       aria-label={`${agent.displayName} details`}
       className="pixel-panel fixed inset-y-0 right-0 z-30 flex w-full max-w-xl flex-col overflow-hidden sm:inset-y-4 sm:right-4"
     >
-      <div className="flex items-start gap-3 border-b-2 border-line p-4">
-        <AgentAvatar agent={agent} size={40} />
-        <div className="min-w-0 flex-1">
-          <h2 className="truncate font-pixel text-xl">{agent.displayName}</h2>
-          <p className="truncate text-sm text-muted">{agent.role ?? agent.key}</p>
+      <div className="border-b-2 border-line p-4">
+        <div className="flex items-start gap-3">
+          <AgentAvatar agent={agent} size={40} />
+          <div className="min-w-0 flex-1">
+            <h2 className="truncate font-pixel text-xl">{agent.displayName}</h2>
+            <p className="truncate text-sm text-muted">{agent.role ?? agent.key}</p>
+          </div>
+          <button ref={closeButton} type="button" onClick={onClose} className="pixel-button text-sm" aria-label="Close">
+            ✕
+          </button>
         </div>
-        <button ref={closeButton} type="button" onClick={onClose} className="pixel-button text-sm" aria-label="Close">
-          ✕
-        </button>
+        <div className="mt-3 flex flex-wrap items-center gap-x-3 gap-y-1 text-sm">
+          <button type="button" onClick={() => void copyAgentLink()} className="text-muted underline underline-offset-4 hover:text-text">
+            Copy agent link
+          </button>
+          <span role="status" className="text-muted">
+            {linkCopy ? (linkCopy.copied ? "Agent link copied." : "Couldn’t copy the link. Select it below.") : null}
+          </span>
+        </div>
+        {linkCopy && !linkCopy.copied ? (
+          <input
+            type="text"
+            readOnly
+            aria-label="Agent link"
+            value={linkCopy.href}
+            onFocus={(event) => event.currentTarget.select()}
+            className="mt-2 w-full rounded border border-line bg-ink px-2 py-1 text-sm text-text"
+          />
+        ) : null}
       </div>
 
       <div className="flex-1 overflow-y-auto p-4">

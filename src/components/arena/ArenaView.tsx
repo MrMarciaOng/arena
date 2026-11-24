@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useMemo, useRef, useState } from "react";
 import { countAgents, GROUPS, groupOf, type Group } from "@/lib/domain";
 import { agentsOf } from "@/lib/live-state";
@@ -17,7 +18,7 @@ export function ArenaView({ slug }: { slug: string }) {
   const arenas = useMemo(() => [slug], [slug]);
   const live = useLiveStream(arenas);
   const nowMs = useNow(5000, live.clockOffsetMs);
-  const [selectedKey, setSelectedKey] = useState<string | null>(null);
+  const selectedKey = useSearchParams().get("agent");
   const [view, setView] = useState<"scene" | "list">("scene");
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Group | "all">("all");
@@ -34,6 +35,17 @@ export function ArenaView({ slug }: { slug: string }) {
     (statusFilter === "all" || groupOf(agent) === statusFilter) &&
     (!query || [agent.displayName, agent.key, agent.role].some((value) => value?.toLowerCase().includes(query))),
   );
+
+  function selectAgent(key: string | null) {
+    const url = new URL(window.location.href);
+    if (key === null) {
+      url.searchParams.delete("agent");
+      window.history.replaceState(null, "", url);
+    } else if (key !== url.searchParams.get("agent")) {
+      url.searchParams.set("agent", key);
+      window.history.pushState(null, "", url);
+    }
+  }
 
   function clearFilters() {
     setSearch("");
@@ -89,6 +101,23 @@ export function ArenaView({ slug }: { slug: string }) {
         </div>
       </div>
       <CountChips counts={countAgents(agents, nowMs)} />
+      {selectedKey !== null && !selected ? (
+        <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-line bg-panel px-3 py-2 text-sm">
+          <p role="status" className="min-w-0 wrap-anywhere text-muted">
+            {selectedKey ? `Agent “${selectedKey}” is unavailable in this arena.` : "This agent link is unavailable."}
+          </p>
+          <button
+            type="button"
+            className="underline underline-offset-4"
+            onClick={() => {
+              selectAgent(null);
+              searchInput.current?.focus();
+            }}
+          >
+            Clear agent link
+          </button>
+        </div>
+      ) : null}
       <div className={isScene ? "grid min-w-0 gap-4 min-[1150px]:grid-cols-[minmax(0,1fr)_300px] 2xl:grid-cols-[minmax(0,1fr)_330px]" : undefined}>
         {isScene ? (
           <div className="workspace-frame min-w-0 self-start">
@@ -97,7 +126,7 @@ export function ArenaView({ slug }: { slug: string }) {
               agents={agents}
               nowMs={nowMs}
               selectedKey={selectedKey}
-              onSelect={setSelectedKey}
+              onSelect={selectAgent}
             />
           </div>
         ) : null}
@@ -147,14 +176,14 @@ export function ArenaView({ slug }: { slug: string }) {
               {agents.length > 0 && matching.length === 0 ? (
                 <p className="text-sm text-muted">No agents match these filters.</p>
               ) : (
-                <AgentList agents={matching} nowMs={nowMs} selectedKey={selectedKey} onSelect={setSelectedKey} />
+                <AgentList agents={matching} nowMs={nowMs} selectedKey={selectedKey} onSelect={selectAgent} />
               )}
             </div>
           </div>
         </aside>
       </div>
       {selected ? (
-        <AgentDrawer key={selected.id} slug={slug} agent={selected} nowMs={nowMs} onClose={() => setSelectedKey(null)} />
+        <AgentDrawer key={selected.id} slug={slug} agent={selected} nowMs={nowMs} onClose={() => selectAgent(null)} />
       ) : null}
     </div>
   );

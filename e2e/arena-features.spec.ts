@@ -1,4 +1,5 @@
 import { expect, test } from "@playwright/test";
+import { E2E_ENV } from "../playwright.config";
 import { admin, createArena, login, report } from "./helpers";
 
 test("search and status filters follow live reports without changing the scene or drawer", async ({ page, request }) => {
@@ -103,4 +104,101 @@ test("narrow rooms support jumps to both destinations and keep their position th
     await expect(navigation).toHaveCount(0);
     await expect(page.getByText("Swipe or scroll sideways to see the whole room.")).toHaveCount(0);
   }
+});
+
+test("agent links survive login and delayed loading and can be copied or selected", async ({ page, request, context }) => {
+  await createArena(request, "linked");
+  await report(request, "linked", "brief.writer", { status: "working", displayName: "Brief Writer" });
+  await page.setViewportSize({ width: 390, height: 850 });
+  await context.grantPermissions(["clipboard-read", "clipboard-write"]);
+
+  let resumeStream = () => {};
+  const held = new Promise<void>((resolve) => { resumeStream = resolve; });
+  await page.route("**/api/stream**", async (route) => {
+    await held;
+    await route.continue();
+  });
+  const path = "/arenas/linked?from=review&agent=brief%2Ewriter";
+  const drawer = page.getByRole("complementary", { name: "Brief Writer details" });
+  try {
+    await page.goto(path);
+    const loginUrl = new URL(page.url());
+    const returnUrl = new URL(loginUrl.searchParams.get("next") ?? "/", loginUrl);
+    expect(returnUrl.pathname).toBe("/arenas/linked");
+    expect(returnUrl.searchParams.get("agent")).toBe("brief.writer");
+    expect(returnUrl.searchParams.get("from")).toBe("review");
+    await page.getByLabel("Password").fill(E2E_ENV.ARENA_OWNER_PASSWORD);
+    await page.getByRole("button", { name: "Log in" }).click();
+    await expect(page.getByText("Connecting…", { exact: true })).toBeVisible();
+    await expect(drawer).toHaveCount(0);
+  } finally {
+    resumeStream();
+  }
+  const close = drawer.getByRole("button", { name: "Close" });
+  const copy = drawer.getByRole("button", { name: "Copy agent link" });
+  await expect(close).toBeFocused();
+  await expect(close).toBeInViewport();
+  await page.unroute("**/api/stream**");
+  expect(new URL(page.url()).searchParams.get("agent")).toBe("brief.writer");
+  expect(new URL(page.url()).searchParams.get("from")).toBe("review");
+  await copy.click();
+  await expect(drawer.getByText("Agent link copied.")).toBeVisible();
+  const copied = new URL(await page.evaluate(() => navigator.clipboard.readText()));
+  expect(copied.pathname).toBe("/arenas/linked");
+  expect(copied.searchParams.get("agent")).toBe("brief.writer");
+  expect(copied.searchParams.get("from")).toBe("review");
+  await report(request, "linked", "brief.writer", { status: "working", activity: "Drafting an update" });
+  await expect(drawer.getByText("Drafting an update", { exact: true })).toBeVisible();
+  await expect(copy).toBeFocused();
+
+  await page.addInitScript(() => Object.defineProperty(navigator, "clipboard", { value: undefined, configurable: true }));
+  await page.reload();
+  await expect(close).toBeFocused();
+  await copy.click();
+  const fallback = drawer.getByRole("textbox", { name: "Agent link" });
+  await expect(fallback).toHaveValue(copied.href);
+  await expect(copy).toBeFocused();
+  await fallback.focus();
+  expect(await fallback.evaluate((el) => el instanceof HTMLInputElement && el.selectionEnd === el.value.length)).toBe(true);
+  await close.click();
+  await expect(drawer).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.has("agent")).toBe(false);
+  expect(new URL(page.url()).searchParams.get("from")).toBe("review");
+  await expect(page.getByRole("searchbox", { name: "Search agents" })).toBeFocused();
+});
+
+test("agent drawers follow browser history and dismiss without reopening on live updates", async ({ page, request }) => {
+  await createArena(request, "history");
+  await report(request, "history", "analyst", { status: "working", displayName: "Analyst" });
+  await report(request, "history", "reviewer", { status: "idle", displayName: "Reviewer" });
+  await login(page);
+  await page.goto("/arenas/history?from=roster&agent=missing");
+  await expect(page.getByText("Agent “missing” is unavailable in this arena.")).toBeVisible();
+  await page.getByRole("button", { name: "Clear agent link" }).click();
+  await expect(page).toHaveURL(/\/arenas\/history\?from=roster$/);
+
+  const analyst = page.getByRole("complementary", { name: "Analyst details" });
+  const reviewer = page.getByRole("complementary", { name: "Reviewer details" });
+  const roster = page.getByRole("complementary", { name: "Agents" });
+  await roster.getByRole("button", { name: /^Analyst/ }).click();
+  await expect(analyst).toBeVisible();
+  expect(new URL(page.url()).searchParams.get("agent")).toBe("analyst");
+  await page.goBack();
+  await expect(analyst).toHaveCount(0);
+  await page.goForward();
+  await expect(analyst).toBeVisible();
+
+  const scene = page.getByRole("region", { name: "Office workspace" });
+  await scene.getByRole("button", { name: /^Reviewer:/ }).click();
+  await expect(reviewer).toBeVisible();
+  await expect(analyst).toHaveCount(0);
+  expect(new URL(page.url()).searchParams.get("agent")).toBe("reviewer");
+  await page.keyboard.press("Escape");
+  await expect(page).toHaveURL(/\/arenas\/history\?from=roster$/);
+  await report(request, "history", "reviewer", { status: "working", activity: "Checking the draft" });
+  await expect(roster.getByText("Checking the draft")).toBeVisible();
+  await expect(reviewer).toHaveCount(0);
+  await page.reload();
+  await expect(roster.getByText("Checking the draft")).toBeVisible();
+  await expect(reviewer).toHaveCount(0);
 });
