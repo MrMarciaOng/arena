@@ -12,7 +12,7 @@ A Next.js web app that shows your AI agents as pixel-art characters in 2D workpl
 ## Non-goals for v1
 
 - Two-way messaging (replying to a waiting agent from the UI). The data model leaves room for it (see Future).
-- Multiple users or teams. There is one owner.
+- Teams and shared arenas. Each arena belongs to one account (in password mode, to the one owner).
 - Running or orchestrating agents. Arena only shows the state they report.
 
 ## Assumptions to confirm
@@ -44,7 +44,7 @@ Next 16 notes: `middleware.ts` is now `proxy.ts`. Route handler `params` is a `P
 ## Domain model
 
 ### Arena
-A workplace. Fields: `id`, `slug` (URL-safe, unique), `name`, `theme` (`office` | `kitchen`), `version`, timestamps.
+A workplace. Fields: `id`, `slug` (URL-safe, unique), `name`, `theme` (`office` | `kitchen`), `ownerUserId` (the Supabase account that owns it; null for an arena without one), `version`, timestamps.
 
 ### API key
 An arena has any number of **named API keys** (for example `default`, `laptop`, `claude-hooks`); agents send one as `Authorization: Bearer <key>`. Fields: `id`, `arenaId`, `name` (unique in the arena), `tokenHash` (SHA-256, how requests are matched), `tokenSealed` (the key encrypted with AES-256-GCM under `ARENA_ENCRYPTION_KEY`, or `ARENA_SESSION_SECRET` when that isn't set), `prefix` (first characters, for telling keys apart), `createdAt`, `lastUsedAt` (updated at most once a minute). The owner can **copy a key again at any time**; a copy of the database file alone doesn't reveal keys. A key with no sealed copy (made before sealing existed, or with no secret configured, or after the secret changed) still works but can't be shown again. Revoking one key leaves the others working. A new arena starts with one key named `default`; at most 50 keys per arena.
@@ -108,9 +108,13 @@ All JSON. Errors look like `{ "error": { "code": "validation_failed", "message":
 
 - Route handlers that write accept **Bearer tokens only**, never cookies, so cookie-based CSRF against the API is impossible.
 - UI mutations (create arena, create, copy and revoke API keys, rename, change theme, remove agent, acknowledge) go through Server Actions. Each action verifies the session and scopes the operation to the authenticated owner's arenas.
-- **`proxy.ts` only gates pages.** A page request without an owner cookie redirects to `/login`, which is exempt. The proxy's matcher excludes `/api/*` (a matched request would have its body buffered, up to 10 MB, before any handler check): each API handler resolves its own credential (admin Bearer, arena API key Bearer, or owner cookie for reads) and returns a JSON 401/403. That way an arena API key can read its own arena over the API, and `/api/health` stays open.
+- **`proxy.ts` only gates pages.** A page request without an owner cookie redirects to `/login`; `/login` and `/auth/confirm` are exempt. In Supabase mode the proxy also refreshes the session cookie. The proxy's matcher excludes `/api/*` (a matched request would have its body buffered, up to 10 MB, before any handler check): each API handler resolves its own credential (admin Bearer, arena API key Bearer, or owner cookie for reads) and returns a JSON 401/403. That way an arena API key can read its own arena over the API, and `/api/health` stays open.
 - `ARENA_ALLOW_ANONYMOUS_READ=1` enables public reads of legacy arenas in password mode. Supabase mode requires an account for browser access.
-- **Login:** Supabase mode uses email and password with verified JWT claims. Password mode compares the configured password in constant time and signs a 30-day cookie with `ARENA_SESSION_SECRET`. Both modes throttle failed attempts in Postgres, use `httpOnly` cookies, and restrict the return path to the app. A cookie-authenticated stream reconnects when the session expires.
+- **Login:**
+  - **Supabase mode** signs people in with a magic link. They enter an email and Supabase sends the link; a new email gets an account on first use unless sign-ups are turned off in Supabase. The link lands on `/auth/confirm`, which exchanges its token hash or PKCE code for a session cookie. Supabase's default link uses PKCE, so it must be opened in the browser that asked for it; an email template with a token-hash link works in any browser. Each request then checks the session's verified JWT claims.
+  - **Password mode** compares the configured password in constant time and signs a 30-day cookie with `ARENA_SESSION_SECRET`.
+  - Both modes share one throttle in Postgres (5 attempts per client and 20 in total per minute). Password mode counts failed attempts; Supabase mode counts every link sent, so the form can't be used to flood an inbox.
+  - Both modes use `httpOnly` cookies and restrict the return path to the app. A cookie-authenticated stream reconnects when the session expires.
 - Keys: 32 random bytes, prefixed `arena_` so secret scanners catch them, looked up by SHA-256 hash, and stored sealed for copying (see "API key" above).
 - Limits: request body ≤ 256 KB (413); 100 agents per arena; a rate limit of 200 requests per 10-second window per token, counted in Postgres (429 with `Retry-After`).
 
@@ -176,7 +180,8 @@ On every reconnect (EventSource's own, or after `reconnect`), the client replace
 - **`/arenas/[slug]`**: the scene, plus a side panel grouped as *Needs you · Working · Waiting · Done · Error · Idle*. Away agents stay in their group, dimmed, with "last seen"; `working` + away shows **Stalled?**. A **Scene / List** toggle; the list view is the accessible fallback and is better with many agents.
 - **Agent drawer** (opened by clicking a sprite or a list row): status, activity, how long it has been in this state, the sanitized markdown answer with a copy button (and a "truncated" notice when needed), and an event timeline. Owner action: **Acknowledge**, which sets a `done` agent back to `idle` once you've read it. The action sends the `version` the drawer is showing and only applies if the agent is still at that version. If a newer answer arrived while the drawer was open, it is not cleared, and the drawer shows "New answer arrived" instead.
 - **`/arenas/[slug]/settings`**: rename, change theme; API keys (create named keys, copy any key again, revoke one, with a ready-made curl snippet); remove agents.
-- **`/arenas/new`**, **`/login`**.
+- **`/arenas/new`**.
+- **`/login`**: the password form, or in Supabase mode the email form. Once a link is sent, the form becomes a "check your inbox" view with a resend countdown, and the waiting tab moves on when the link signs that browser in. The emailed link lands on the route handler `/auth/confirm`.
 
 ### Scene rendering
 - **DOM + CSS**, not canvas or WebGL. The scene is a fixed logical resolution (for example 384×216) scaled up by an integer factor with `image-rendering: pixelated`. Each agent is an absolutely positioned `<button>` (clickable, focusable, with an aria-label) whose sprite sheet animates with CSS `steps()`. Movement is a CSS `transform` transition, with the walk pose shown while it moves. Depth order comes from the y coordinate. This handles the expected scale (up to 100 agents) and keeps bubbles, tooltips and accessibility simple.
@@ -209,7 +214,8 @@ On every reconnect (EventSource's own, or after `reconnect`), the client replace
 src/
   app/
     page.tsx                         # overview
-    login/page.tsx
+    login/page.tsx, login/LoginForm.tsx
+    auth/confirm/route.ts            # where the emailed sign-in link lands
     arenas/new/page.tsx
     arenas/[slug]/page.tsx           # scene + panel
     arenas/[slug]/settings/page.tsx
@@ -229,6 +235,8 @@ src/
     env.ts                           # zod-validated env, fail fast
     db/schema.ts, db/client.ts       # drizzle pg-core; postgres-js or PGlite; writeTx (counter lock)
     auth.ts                          # credential resolution, owner session
+    session.ts                       # the password-mode session cookie
+    supabase-auth.ts                 # Supabase sign-in links and sessions
     arenas.ts, agents.ts, events.ts, keys.ts  # services: all business rules live here
     feed.ts                          # change feed: emit in the write's transaction, read, prune
     snapshot.ts                      # the stream's REPEATABLE READ snapshot
@@ -244,15 +252,19 @@ src/
   lib/
     schemas.ts                       # shared zod schemas + types
     client.ts                        # tiny typed client (fetch wrapper)
+    safe-next.ts                     # keeps the after-login return path inside the app
 drizzle/                             # migrations (Postgres)
 scripts/
   simulate.ts                        # fake agents cycling through states
   migrate.ts                         # create/upgrade the database
   arena-report.mjs                   # CLI reporter (Node, no dependencies)
+  install-skill.sh                   # links the skill into Claude Code and Codex
   smoke-api.sh                       # curl walk-through of the API
 examples/
   claude-code-hooks/                 # settings.json + hook script
   codex-notify/                      # notify script
+skills/
+  arena-presence/                    # skill that teaches an agent to report for itself
 ```
 
 Route handlers stay thin: parse, authenticate, call a service, serialize. Services hold all the rules, so they can be tested without HTTP.
@@ -337,7 +349,7 @@ The app is still plain Next.js and plain Postgres, so `pnpm db:migrate && pnpm b
 | An agent goes quiet, or exits after finishing | Presence is separate from status: away dims the agent but never hides its answer or request; `working` + away is flagged Stalled? |
 | Reports arrive out of order | The optional `session` + `seq` guard on the server; the per-agent `version` on the client |
 | Changes happen while the browser is disconnected | Every connection starts from a fresh snapshot; nothing depends on replaying history |
-| Sensitive answers exposed | The owner password is required in production; every Server Action checks the session; login is throttled; API keys are scoped per arena, revocable one by one, and encrypted at rest; markdown is sanitized with images off |
+| Sensitive answers exposed | A login (Supabase account or owner password) is required in production unless anonymous read is turned on; every Server Action checks the session; login is throttled; API keys are scoped per arena, revocable one by one, and encrypted at rest; markdown is sanitized with images off |
 | Event table grows | Retention caps; history isn't used for replay, so pruning is safe; `result` is only kept on `done` reports |
 | Feed table grows | An hour of retention, pruned daily; a stream that falls behind the pruned point starts over from a snapshot |
 | Each open dashboard keeps a function running and polls once a second | Polls are one indexed query; streams end every 240 s; a client that stops reading is dropped at 4 MB of backlog. Raise `ARENA_STREAM_POLL_MS` to trade latency for load |
