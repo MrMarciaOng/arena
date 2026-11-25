@@ -18,16 +18,16 @@ export default function LoginPage({ searchParams }: PageProps<"/login">) {
 
 async function LoginFormWithNext({ searchParams }: Pick<PageProps<"/login">, "searchParams">) {
   await connection();
-  const { next } = await searchParams;
+  const { next, error } = await searchParams;
   const provider = getEnv().ARENA_AUTH_PROVIDER;
   return (
     <>
       <p className="mt-1 text-sm text-muted">
         {provider === "supabase"
-          ? "Sign in with your Supabase email and password."
+          ? "Enter your email and we'll send you a sign-in link."
           : "Enter the password set in ARENA_OWNER_PASSWORD."}
       </p>
-      <LoginForm next={typeof next === "string" ? next : "/"} provider={provider} />
+      <LoginForm next={typeof next === "string" ? next : "/"} provider={provider} linkFailed={error === "link"} />
     </>
   );
 }

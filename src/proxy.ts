@@ -9,7 +9,8 @@ import { createSupabaseAuthClient, readSupabaseSession } from "./server/supabase
  * /arenas/notes.txt has two segments, so it is still gated.
  */
 const SKIP_PROXY = /^\/(?:api\/|_next\/|[^/]+\.(?:png|svg|ico|webp|jpg|txt|webmanifest)$)/;
-const LOGIN_PATH = /^\/login(?:\/|$)/;
+/** Pages anyone can open: the login form and the Supabase sign-in link it emails. */
+const LOGIN_PATH = /^\/(?:login|auth\/confirm)(?:\/|$)/;
 
 /**
  * Page gate only: no owner cookie, redirect to /login. It is not an auth boundary for Server

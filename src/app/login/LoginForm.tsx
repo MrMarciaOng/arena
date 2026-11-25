@@ -6,35 +6,45 @@ import type { Env } from "@/server/env";
 
 const inputClass = "border-2 border-line bg-ink px-3 py-2 text-text outline-none focus:border-muted";
 
-export function LoginForm({ next, provider }: { next: string; provider: Env["ARENA_AUTH_PROVIDER"] }) {
+export function LoginForm({
+  next,
+  provider,
+  linkFailed = false,
+}: {
+  next: string;
+  provider: Env["ARENA_AUTH_PROVIDER"];
+  linkFailed?: boolean;
+}) {
   const [state, action, pending] = useActionState<LoginState, FormData>(loginAction, {});
+  const error = state.error ?? (linkFailed && !state.sent ? "That sign-in link is invalid or has expired. Request a new one." : undefined);
   return (
     <form action={action} className="mt-5 flex flex-col gap-3">
       <input type="hidden" name="next" value={next} />
       {provider === "supabase" ? (
         <label className="flex flex-col gap-1 text-sm">
           Email
-          <input name="email" type="email" required autoFocus autoComplete="username" className={inputClass} />
+          <input name="email" type="email" required autoFocus autoComplete="email" className={inputClass} />
         </label>
+      ) : (
+        <label className="flex flex-col gap-1 text-sm">
+          Password
+          <input name="password" type="password" required autoFocus autoComplete="current-password" className={inputClass} />
+        </label>
+      )}
+      {state.sent ? (
+        <p role="status" className="text-sm text-muted">
+          Check {state.sent} for a sign-in link. You can close this tab.
+        </p>
       ) : null}
-      <label className="flex flex-col gap-1 text-sm">
-        Password
-        <input
-          name="password"
-          type="password"
-          required
-          autoFocus={provider === "password"}
-          autoComplete="current-password"
-          className={inputClass}
-        />
-      </label>
-      {state.error ? (
+      {error ? (
         <p role="alert" className="text-sm text-error">
-          {state.error}
+          {error}
         </p>
       ) : null}
       <button type="submit" className="pixel-button" disabled={pending}>
-        {pending ? "Checking…" : "Log in"}
+        {provider === "supabase"
+          ? pending ? "Sending…" : state.sent ? "Send another link" : "Email me a sign-in link"
+          : pending ? "Checking…" : "Log in"}
       </button>
     </form>
   );

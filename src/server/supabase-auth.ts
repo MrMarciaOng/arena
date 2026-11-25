@@ -51,14 +51,53 @@ export function supabaseCookieStore(store: CookieStore, writable: boolean): Cook
   };
 }
 
-export async function signInWithSupabase(
+export type MagicLinkResult = { ok: true } | { ok: false; rateLimited: boolean };
+
+/**
+ * Emails a sign-in link. Supabase creates the account on first use unless sign-ups are turned off
+ * (Authentication → Sign In / Providers). The default email link uses PKCE: its code verifier is
+ * kept in a cookie, so the link must be opened in the browser that asked for it. A custom email
+ * template with a token-hash link (README) works in any browser.
+ */
+export async function sendSupabaseMagicLink(
   env: SupabaseEnv,
-  options: { store: CookieStore; secure: boolean; email: string; password: string },
-): Promise<boolean> {
-  const { store, secure, email, password } = options;
+  options: { store: CookieStore; secure: boolean; email: string; redirectTo: string },
+): Promise<MagicLinkResult> {
+  const { store, secure, email, redirectTo } = options;
   const client = createSupabaseAuthClient(env, { secure, cookies: supabaseCookieStore(store, true) });
-  const { data, error } = await client.auth.signInWithPassword({ email, password });
-  return !error && data.session !== null;
+  try {
+    const { error } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
+    return error ? { ok: false, rateLimited: error.status === 429 } : { ok: true };
+  } catch {
+    return { ok: false, rateLimited: false };
+  }
+}
+
+const linkType = z.enum(["email", "magiclink", "signup"]);
+
+/** Turns the link from the email (token_hash + type, or a PKCE code) into a session cookie. */
+export async function confirmSupabaseLink(
+  env: SupabaseEnv,
+  options: { store: CookieStore; secure: boolean; params: URLSearchParams },
+): Promise<boolean> {
+  const { store, secure, params } = options;
+  const client = createSupabaseAuthClient(env, { secure, cookies: supabaseCookieStore(store, true) });
+  const tokenHash = params.get("token_hash");
+  const type = linkType.safeParse(params.get("type"));
+  const code = params.get("code");
+  try {
+    if (tokenHash && type.success) {
+      const { data, error } = await client.auth.verifyOtp({ token_hash: tokenHash, type: type.data });
+      return !error && data.session !== null;
+    }
+    if (code) {
+      const { data, error } = await client.auth.exchangeCodeForSession(code);
+      return !error && data.session !== null;
+    }
+  } catch {
+    // A malformed or reused link.
+  }
+  return false;
 }
 
 export async function signOutFromSupabase(env: SupabaseEnv, options: { store: CookieStore; secure: boolean }) {

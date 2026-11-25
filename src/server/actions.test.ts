@@ -2,6 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { GET as getArenaList, POST as createAdminArena } from "@/app/api/arenas/route";
 import { GET as getArenaDetail } from "@/app/api/arenas/[slug]/route";
 import { GET as openStream } from "@/app/api/stream/route";
+import { GET as confirmSignIn } from "@/app/auth/confirm/route";
+import { NextRequest } from "next/server";
 import { ADMIN_TOKEN, OWNER_PASSWORD } from "../../test/constants";
 import { ownerCookie, params, read, req } from "../../test/helpers";
 import { reportStatus } from "./agents";
@@ -165,6 +167,7 @@ describe("Supabase accounts", () => {
     "second@example.test": "c37dbef1-1cf2-4cc6-8ee4-be2a324c0002",
   };
   const sessionCookie = "arena_supabase_session";
+  const sentLinks: { email: string; redirectTo: string }[] = [];
   const encode = (data: unknown) => Buffer.from(JSON.stringify(data)).toString("base64url");
   const formData = (values: Record<string, string>) => {
     const form = new FormData();
@@ -177,12 +180,19 @@ describe("Supabase accounts", () => {
     process.env.SUPABASE_URL = "https://auth.example.test";
     process.env.SUPABASE_PUBLISHABLE_KEY = "sb_publishable_arena-test";
     const tokens = new Map<string, string>();
+    sentLinks.length = 0;
     vi.stubGlobal("fetch", async (input: string, init: RequestInit) => {
       const url = new URL(input);
-      if (url.pathname === "/auth/v1/token" && url.searchParams.get("grant_type") === "password") {
-        const { email } = JSON.parse(String(init.body));
-        const id = Object.entries(accounts).find(([address]) => address === email)?.[1];
-        if (!id) throw new Error("Unexpected account in test sign-in");
+      if (url.pathname === "/auth/v1/otp") {
+        const body = JSON.parse(String(init.body));
+        if (!(body.email in accounts)) throw new Error("Unexpected account in test sign-in");
+        sentLinks.push({ email: body.email, redirectTo: url.searchParams.get("redirect_to") ?? "" });
+        return Response.json({});
+      }
+      if (url.pathname === "/auth/v1/verify") {
+        const { token_hash: tokenHash, type } = JSON.parse(String(init.body));
+        const id = Object.entries(accounts).find(([address]) => `hash-${address}` === tokenHash)?.[1];
+        if (!id || type !== "email") return Response.json({ message: "Token has expired or is invalid" }, { status: 403 });
         const claims = { sub: id, role: "authenticated", exp: Math.floor(Date.now() / 1000) + 3600 };
         const token = `${encode({ alg: "HS256" })}.${encode(claims)}.${encode("signature")}`;
         tokens.set(`Bearer ${token}`, id);
@@ -204,11 +214,25 @@ describe("Supabase accounts", () => {
 
   afterEach(() => vi.unstubAllGlobals());
 
+  /** Requests a link from the login form, then opens it the way the email's token-hash link does. */
   async function signIn(email: keyof typeof accounts) {
-    await expect(loginAction({}, formData({ email, password: OWNER_PASSWORD, next: "/arenas/new" })))
-      .rejects.toMatchObject({ to: "/arenas/new" });
-    expect(cookieOptions.get(sessionCookie)).toMatchObject({ httpOnly: true, sameSite: "lax" });
+    requestHeaders.set("origin", "https://arena.example.test");
+    expect(await loginAction({}, formData({ email, next: "/arenas/new" }))).toEqual({ sent: email });
+    const link = new URL(sentLinks.at(-1)!.redirectTo);
+    expect(link.origin + link.pathname).toBe("https://arena.example.test/auth/confirm");
+    link.searchParams.set("token_hash", `hash-${email}`);
+    link.searchParams.set("type", "email");
+    await expect(confirmSignIn(new NextRequest(link))).rejects.toMatchObject({ to: "/arenas/new" });
+    expect(cookieOptions.get(sessionCookie)).toMatchObject({ httpOnly: true, sameSite: "lax", secure: true });
   }
+
+  it("rejects an invalid email and an invalid or expired sign-in link", async () => {
+    expect(await loginAction({}, formData({ email: "not-an-email" }))).toEqual({ error: "Enter a valid email address." });
+    const link = new URL("https://arena.example.test/auth/confirm?token_hash=stale&type=email&next=/arenas/new");
+    await expect(confirmSignIn(new NextRequest(link)))
+      .rejects.toMatchObject({ to: "/login?error=link&next=%2Farenas%2Fnew" });
+    expect(jar.has(sessionCookie)).toBe(false);
+  });
 
   const create = (slug: string) => createArenaAction({}, formData({ slug, name: slug }));
   const list = async () => read(await requestArenaList());

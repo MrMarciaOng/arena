@@ -26,12 +26,18 @@ For offline development or automated tests, Arena also supports [PGlite](https:/
 
 ### Sign in with Supabase Auth
 
-1. In the Supabase dashboard, open **Authentication → Users**. Create confirmed accounts with an email and password for the people who need access.
+Arena signs people in with a Supabase magic link: they enter their email and open the link Supabase sends.
+
+1. In the Supabase dashboard, open **Authentication → URL Configuration**. Set **Site URL** to the production URL, and add `<your-domain>/**` to **Redirect URLs** for every domain Arena runs on (for example `http://localhost:3000/**` and your Vercel preview domains). Links go to `/auth/confirm`.
 2. Set `ARENA_AUTH_PROVIDER=supabase`, `SUPABASE_URL`, and `SUPABASE_PUBLISHABLE_KEY`. Apply the settings in `.env.local` for development or in Vercel for a deployment.
 3. Keep the same `ARENA_ENCRYPTION_KEY` or `ARENA_SESSION_SECRET` so you can still copy existing API keys. For a new installation, set `ARENA_ENCRYPTION_KEY`.
-4. Run `pnpm db:migrate` and restart Arena. Open `/login` and enter your Supabase account's email and password.
+4. Run `pnpm db:migrate` and restart Arena. Open `/login`, enter your email, and open the link in the same browser.
 
-Each Supabase account can create and manage up to eight private arenas. Deleting an arena frees a slot. Manage accounts in **Authentication → Users**. [Supabase password-based authentication](https://supabase.com/docs/guides/auth/passwords)
+New emails get an account on first sign-in. To allow only accounts you create, turn off **Allow new users to sign up** (Authentication → Sign In / Providers) and invite people from **Authentication → Users**.
+
+Supabase's built-in email service sends only a few emails an hour, and only to members of your Supabase organization. Configure custom SMTP (Authentication → Emails → SMTP Settings) before others sign in. With custom SMTP you can also make links work in any browser: set the **Magic link** and **Confirm signup** templates' link to `{{ .RedirectTo }}&token_hash={{ .TokenHash }}&type=email`.
+
+Each Supabase account can create and manage up to eight private arenas. Deleting an arena frees a slot. [Supabase magic links](https://supabase.com/docs/guides/auth/auth-email-passwordless)
 
 Existing arenas without an assigned Supabase user stay accessible in password mode and through the admin API. Supabase accounts start with an empty dashboard. To create an arena for a specific account through the admin API, include its Supabase User UID as `ownerUserId` in `POST /api/arenas`. The arena counts toward that account's limit.
 

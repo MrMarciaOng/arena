@@ -13,7 +13,7 @@ import { getEnv, ownerLoginEnabled, passwordSessionKeys } from "./env";
 import { ApiError } from "./errors";
 import { loginRetryAfter, recordLoginFailure } from "./rate-limit";
 import { createSessionValue, secureSessionCookie, SESSION_COOKIE, SESSION_TTL_MS } from "./session";
-import { signInWithSupabase, signOutFromSupabase } from "./supabase-auth";
+import { sendSupabaseMagicLink, signOutFromSupabase } from "./supabase-auth";
 import { secretsEqual } from "./tokens";
 
 // Every action that changes data calls requireOwner() first. Next checks the Origin of action
@@ -41,7 +41,16 @@ function clientAddress(h: Headers, trustProxy: boolean): string {
 }
 
 
-export type LoginState = { error?: string };
+export type LoginState = { error?: string; sent?: string };
+
+/** This site's origin as the browser sees it. Next rejects actions whose Origin isn't this host. */
+function requestOrigin(h: Headers): string | null {
+  const origin = h.get("origin");
+  if (origin && origin !== "null") return origin;
+  const host = h.get("x-forwarded-host") ?? h.get("host");
+  if (!host) return null;
+  return `${h.get("x-forwarded-proto") ?? "https"}://${host}`;
+}
 
 export async function loginAction(_prev: LoginState, form: FormData): Promise<LoginState> {
   const env = getEnv();
@@ -54,18 +63,31 @@ export async function loginAction(_prev: LoginState, form: FormData): Promise<Lo
   const wait = await loginRetryAfter(client, now);
   if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.` };
 
-  const password = form.get("password");
   const secure = secureSessionCookie(env, h);
   if (env.ARENA_AUTH_PROVIDER === "supabase") {
-    const email = form.get("email");
-    if (typeof email === "string" && typeof password === "string" &&
-        await signInWithSupabase(env, { store: await cookies(), secure, email: email.trim(), password })) {
-      redirect(safeNext(form.get("next")));
-    }
+    const email = z.email().safeParse(String(form.get("email") ?? "").trim());
+    if (!email.success) return { error: "Enter a valid email address." };
+    const origin = requestOrigin(h);
+    if (!origin) return { error: "Couldn't send the sign-in link. Try again." };
+    // Every email sent counts toward the login throttle, so the form can't be used to flood an inbox.
     await recordLoginFailure(client, now);
-    return { error: "Wrong email or password." };
+    const redirectTo = new URL("/auth/confirm", origin);
+    redirectTo.searchParams.set("next", safeNext(form.get("next")));
+    const result = await sendSupabaseMagicLink(env, {
+      store: await cookies(),
+      secure,
+      email: email.data,
+      redirectTo: redirectTo.toString(),
+    });
+    if (result.ok) return { sent: email.data };
+    return {
+      error: result.rateLimited
+        ? "Too many sign-in emails were sent. Try again later."
+        : "Couldn't send the sign-in link. Try again.",
+    };
   }
 
+  const password = form.get("password");
   const keys = passwordSessionKeys(env);
   if (!keys || typeof password !== "string" || !secretsEqual(password, keys.password)) {
     await recordLoginFailure(client, now);
