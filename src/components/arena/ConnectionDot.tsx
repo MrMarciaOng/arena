@@ -21,3 +21,12 @@ export function ConnectionDot({ state }: { state: LiveState["connection"] }) {
     </span>
   );
 }
+
+export function ConnectionFailure({ onRetry }: { onRetry: () => void }) {
+  return (
+    <div className="pixel-panel flex flex-wrap items-center gap-3 p-4 text-sm">
+      <p role="alert" className="text-error">Couldn’t connect to live updates.</p>
+      <button type="button" className="pixel-button" onClick={onRetry}>Retry</button>
+    </div>
+  );
+}

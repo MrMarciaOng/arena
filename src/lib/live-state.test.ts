@@ -56,6 +56,14 @@ const snap = (agents: AgentPublic[], arenas = [arena], seq = 0): StreamMessage =
 const slot = agentSlot("a1", "bot");
 
 describe("liveReducer", () => {
+  it("retries initial failures and preserves a loaded roster while reconnecting", () => {
+    const empty = liveReducer(initialLiveState, { type: "failed" });
+    expect(liveReducer(empty, { type: "retry" })).toMatchObject({ hasSnapshot: false, connection: "connecting" });
+    const loaded = apply(initialLiveState, snap([agent()]));
+    const failed = liveReducer(loaded, { type: "failed" });
+    expect(liveReducer(failed, { type: "retry" })).toEqual({ ...loaded, connection: "reconnecting" });
+  });
+
   it("keeps the newer version when messages arrive out of order", () => {
     const s = apply(
       initialLiveState,

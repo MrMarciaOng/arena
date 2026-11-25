@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState, useTransition } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useSyncExternalStore, useTransition } from "react";
 import { groupOf, type AgentDetail, type AgentEvent, type AgentPublic } from "@/lib/domain";
 import { shortDuration, since } from "@/lib/format";
 import { acknowledgeAction } from "@/server/actions";
@@ -11,6 +11,14 @@ import { useAgentDetail } from "./useAgentDetail";
 
 /** The answer on screen. It stays put until the reader asks for a newer one or dismisses it. */
 type ShownAnswer = { version: number; result: string | null; truncated: boolean };
+
+const mobileDrawerQuery = "(width < 40rem)";
+
+function subscribeToDrawerSize(callback: () => void) {
+  const query = window.matchMedia(mobileDrawerQuery);
+  query.addEventListener("change", callback);
+  return () => query.removeEventListener("change", callback);
+}
 
 function eventLabel(e: AgentEvent): string {
   const r = (e.report ?? {}) as Record<string, unknown>;
@@ -73,6 +81,8 @@ export function AgentDrawer({
   const [notice, setNotice] = useState<string | null>(null);
   const [linkCopy, setLinkCopy] = useState<{ href: string; copied: boolean } | null>(null);
   const [pending, startTransition] = useTransition();
+  const [retrying, setRetrying] = useState(false);
+  const mobile = useSyncExternalStore(subscribeToDrawerSize, () => window.matchMedia(mobileDrawerQuery).matches, () => false);
   const closeButton = useRef<HTMLButtonElement>(null);
   const onCloseRef = useRef(onClose);
   useEffect(() => {
@@ -80,20 +90,43 @@ export function AgentDrawer({
   }, [onClose]);
 
   // Keyboard: move focus into the drawer on open, back to whatever opened it on close; Escape closes.
-  useEffect(() => {
-    const drawer = closeButton.current?.closest("aside");
+  useLayoutEffect(() => {
+    const drawer = closeButton.current?.closest("[data-agent-drawer]");
     const scope = drawer?.closest("[data-arena-view]");
     const active = document.activeElement;
     const opener = active instanceof HTMLElement && scope?.contains(active) ? active : null;
+    const dialog = drawer instanceof HTMLDialogElement ? drawer : null;
+    const overflow = document.documentElement.style.overflow;
+    if (dialog) {
+      dialog.showModal();
+      document.documentElement.style.overflow = "hidden";
+    }
     closeButton.current?.focus();
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") onCloseRef.current();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onCloseRef.current();
+      }
+      if (e.key !== "Tab" || !dialog) return;
+      const controls = [...dialog.querySelectorAll<HTMLElement>("button:not(:disabled), a[href], input:not(:disabled), summary")]
+        .filter((element) => element.getClientRects().length > 0);
+      const first = controls[0];
+      const last = controls.at(-1);
+      const focused = document.activeElement;
+      if (e.shiftKey ? focused === first : focused === last) {
+        e.preventDefault();
+        (e.shiftKey ? last : first)?.focus();
+      }
     };
     document.addEventListener("keydown", onKey);
     const agentKey = opener?.getAttribute("data-agent") ?? opener?.getAttribute("data-agent-sprite");
     const attr = opener?.hasAttribute("data-agent") ? "data-agent" : "data-agent-sprite";
     return () => {
       document.removeEventListener("keydown", onKey);
+      if (dialog) {
+        dialog.close();
+        document.documentElement.style.overflow = overflow;
+      }
       const focused = document.activeElement;
       if (focused && scope?.contains(focused) && !drawer?.contains(focused)) return;
       if (opener?.isConnected && opener.getClientRects().length > 0) {
@@ -116,7 +149,7 @@ export function AgentDrawer({
       }
       scope?.querySelector<HTMLInputElement>('input[type="search"]')?.focus();
     };
-  }, []);
+  }, [mobile]);
 
   // Fold each fetched detail into the pinned answer (adjusting state on new data, during render).
   const [seenDetail, setSeenDetail] = useState(detail);
@@ -168,19 +201,32 @@ export function AgentDrawer({
     setLinkCopy({ href: url.href, copied: await copyText(url.href) });
   }
 
+  async function retryDetails() {
+    setRetrying(true);
+    try {
+      await load();
+    } finally {
+      setRetrying(false);
+    }
+  }
+
+  const Drawer = mobile ? "dialog" : "aside";
   return (
-    <aside
+    <Drawer
+      data-agent-drawer
       aria-label={`${agent.displayName} details`}
-      className="pixel-panel fixed inset-y-0 right-0 z-30 flex w-full max-w-xl flex-col overflow-hidden sm:inset-y-4 sm:right-4"
+      aria-modal={mobile || undefined}
+      className="pixel-panel fixed inset-y-0 right-0 z-30 m-0 flex max-h-none w-full max-w-xl flex-col overflow-hidden text-text max-sm:h-full max-sm:max-w-none max-sm:not-open:hidden sm:inset-y-4 sm:right-4"
     >
       <div className="border-b-2 border-line p-4">
         <div className="flex items-start gap-3">
           <AgentAvatar agent={agent} size={40} />
           <div className="min-w-0 flex-1">
-            <h2 className="truncate font-pixel text-xl">{agent.displayName}</h2>
-            <p className="truncate text-sm text-muted">{agent.role ?? agent.key}</p>
+            <h2 className="wrap-anywhere font-pixel text-xl">{agent.displayName}</h2>
+            {agent.role ? <p className="wrap-anywhere text-sm text-muted">{agent.role}</p> : null}
+            <p className="wrap-anywhere text-xs text-muted"><code>{agent.key}</code></p>
           </div>
-          <button ref={closeButton} type="button" onClick={onClose} className="pixel-button text-sm" aria-label="Close">
+          <button ref={closeButton} type="button" onClick={onClose} className="pixel-button shrink-0 text-sm" aria-label="Close">
             ✕
           </button>
         </div>
@@ -262,7 +308,7 @@ export function AgentDrawer({
               <p className="text-sm text-muted">No answer text was sent.</p>
             )}
           </section>
-        ) : agent.status === "done" && !detail ? (
+        ) : agent.status === "done" && !detail && !loadError ? (
           <p className="mt-5 text-sm text-muted">Loading the answer…</p>
         ) : null}
         {notice ? (
@@ -270,7 +316,14 @@ export function AgentDrawer({
             {notice}
           </p>
         ) : null}
-        {loadError ? <p className="mt-2 text-sm text-error">Couldn&apos;t load details: {loadError}</p> : null}
+        {loadError ? (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+            <p role="alert" className="wrap-anywhere text-error">Couldn&apos;t load details: {loadError}</p>
+            <button type="button" className="pixel-button text-xs" disabled={retrying} onClick={() => void retryDetails()}>
+              {retrying ? "Retrying…" : "Retry"}
+            </button>
+          </div>
+        ) : null}
 
         {agent.metadata !== null ? (
           <details className="mt-6 text-sm">
@@ -291,6 +344,6 @@ export function AgentDrawer({
           </ol>
         </section>
       </div>
-    </aside>
+    </Drawer>
   );
 }

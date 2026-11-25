@@ -35,18 +35,33 @@ export function StatusChip({ group, label }: { group: Group; label?: string }) {
 export function CountChips({
   counts,
   compact = false,
+  onSelect,
+  selected,
 }: {
   counts: Record<Group, number> & { away: number };
   compact?: boolean;
+  onSelect?: (group: Group) => void;
+  selected?: Group;
 }) {
   const order: Group[] = ["needsYou", "working", "waiting", "done", "error", "idle"];
   const shown = order.filter((g) => counts[g] > 0);
   if (shown.length === 0) return <span className="text-sm text-muted">No agents yet</span>;
   return (
     <div className="flex flex-wrap gap-1.5">
-      {shown.map((g) => (
-        <StatusChip key={g} group={g} label={`${counts[g]} ${compact ? "" : GROUP_LABEL[g].toLowerCase()}`.trim()} />
-      ))}
+      {shown.map((g) => {
+        const chip = <StatusChip group={g} label={`${counts[g]} ${compact ? "" : GROUP_LABEL[g].toLowerCase()}`.trim()} />;
+        return onSelect ? (
+          <button
+            key={g}
+            type="button"
+            aria-pressed={selected === g}
+            onClick={() => onSelect(g)}
+            className="cursor-pointer hover:bg-panel-2 aria-pressed:bg-panel-2 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-done"
+          >
+            {chip}
+          </button>
+        ) : <span key={g}>{chip}</span>;
+      })}
       {counts.away > 0 ? <span className="px-1 text-xs leading-6 text-muted">{counts.away} away</span> : null}
     </div>
   );

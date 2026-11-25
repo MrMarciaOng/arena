@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { useMemo, useRef, useState } from "react";
+import { useMemo, useRef, useState, useSyncExternalStore } from "react";
 import { countAgents, GROUPS, groupOf, type Group } from "@/lib/domain";
 import { agentsOf } from "@/lib/live-state";
 import { Scene } from "@/scene/Scene";
@@ -10,19 +10,33 @@ import { useLiveStream, useNow } from "../live/useLiveStream";
 import { CountChips, GROUP_LABEL } from "../status";
 import { AgentDrawer } from "./AgentDrawer";
 import { AgentList } from "./AgentList";
-import { ConnectionDot } from "./ConnectionDot";
+import { ConnectionDot, ConnectionFailure } from "./ConnectionDot";
 
 const filterField = "h-9 min-w-0 rounded border border-line bg-ink px-2 text-sm text-text";
+const noSubscription = () => () => {};
+type ArenaMode = "scene" | "list";
+
+function readView(key: string): ArenaMode {
+  try {
+    return localStorage.getItem(key) === "list" ? "list" : "scene";
+  } catch {
+    return "scene";
+  }
+}
 
 export function ArenaView({ slug }: { slug: string }) {
   const arenas = useMemo(() => [slug], [slug]);
   const live = useLiveStream(arenas);
   const nowMs = useNow(5000, live.clockOffsetMs);
   const selectedKey = useSearchParams().get("agent");
-  const [view, setView] = useState<"scene" | "list">("scene");
+  const viewKey = `arena:view:${slug}`;
+  const storedView = useSyncExternalStore(noSubscription, () => readView(viewKey), (): ArenaMode => "scene");
+  const [viewChoice, setViewChoice] = useState<ArenaMode | null>(null);
+  const view = viewChoice ?? storedView;
   const [search, setSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState<Group | "all">("all");
   const searchInput = useRef<HTMLInputElement>(null);
+  const rosterHeading = useRef<HTMLHeadingElement>(null);
   const rosterList = useRef<HTMLDivElement>(null);
 
   const arena = Object.values(live.arenas).find((a) => a.slug === slug) ?? null;
@@ -54,8 +68,24 @@ export function ArenaView({ slug }: { slug: string }) {
     searchInput.current?.focus();
   }
 
+  function chooseView(mode: ArenaMode) {
+    setViewChoice(mode);
+    try {
+      localStorage.setItem(viewKey, mode);
+    } catch {
+      // The view still works when browser storage is unavailable.
+    }
+  }
+
+  function showRosterGroup(group: Group) {
+    setStatusFilter(group);
+    rosterList.current?.scrollTo({ top: 0 });
+    rosterHeading.current?.focus({ preventScroll: true });
+    rosterHeading.current?.scrollIntoView({ block: "start" });
+  }
+
   if (live.connection === "failed") {
-    return <p className="font-pixel text-error">Can&apos;t load this arena.</p>;
+    return <ConnectionFailure onRetry={live.retry} />;
   }
   if (!live.hasSnapshot) {
     return <p className="font-pixel text-muted">Connecting…</p>;
@@ -88,7 +118,7 @@ export function ArenaView({ slug }: { slug: string }) {
                 key={v}
                 type="button"
                 aria-pressed={view === v}
-                onClick={() => setView(v)}
+                onClick={() => chooseView(v)}
                 className="workspace-view-button capitalize"
               >
                 {v}
@@ -100,7 +130,11 @@ export function ArenaView({ slug }: { slug: string }) {
           </Link>
         </div>
       </div>
-      <CountChips counts={countAgents(agents, nowMs)} />
+      <CountChips
+        counts={countAgents(agents, nowMs)}
+        onSelect={showRosterGroup}
+        selected={statusFilter === "all" ? undefined : statusFilter}
+      />
       {selectedKey !== null && !selected ? (
         <div className="flex flex-wrap items-center justify-between gap-2 rounded border border-line bg-panel px-3 py-2 text-sm">
           <p role="status" className="min-w-0 wrap-anywhere text-muted">
@@ -134,7 +168,7 @@ export function ArenaView({ slug }: { slug: string }) {
           <div className={isScene ? "workspace-agents-content" : undefined}>
             <div className="mb-4 shrink-0 border-b border-line pb-3">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
-                <h2 className="font-pixel text-xl">Agents</h2>
+                <h2 ref={rosterHeading} tabIndex={-1} className="font-pixel text-xl">Agents</h2>
                 <span role="status" className="ml-auto text-xs tabular-nums text-muted">
                   {filtering ? `${matching.length} of ${agents.length} agents` : agents.length}
                 </span>
@@ -173,7 +207,15 @@ export function ArenaView({ slug }: { slug: string }) {
               ) : null}
             </div>
             <div ref={rosterList} className={isScene ? "workspace-agents-list" : undefined}>
-              {agents.length > 0 && matching.length === 0 ? (
+              {agents.length === 0 ? (
+                <div className="space-y-2 text-sm text-muted">
+                  <p>No agents in this arena yet.</p>
+                  <p>Agents appear after their first report.</p>
+                  <Link href={`/arenas/${arena.slug}/settings#api-keys`} className="text-done underline underline-offset-4">
+                    Go to API keys
+                  </Link>
+                </div>
+              ) : matching.length === 0 ? (
                 <p className="text-sm text-muted">No agents match these filters.</p>
               ) : (
                 <AgentList agents={matching} nowMs={nowMs} selectedKey={selectedKey} onSelect={selectAgent} />

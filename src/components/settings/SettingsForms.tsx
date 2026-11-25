@@ -1,7 +1,7 @@
 "use client";
 
 import { useRouter } from "next/navigation";
-import { useActionState, useEffect } from "react";
+import { useActionState, useEffect, useRef, useState } from "react";
 import { THEMES, type AgentPublic, type ApiKeyPublic, type ArenaPublic } from "@/lib/domain";
 import { deleteArenaAction, removeAgentAction, updateArenaAction, type FormState } from "@/server/arena-actions";
 import { ApiKeys } from "./ApiKeys";
@@ -55,19 +55,61 @@ function RenameForm({ arena }: { arena: ArenaPublic }) {
   );
 }
 
-function RemoveAgentButton({ arena, agent }: { arena: ArenaPublic; agent: AgentPublic }) {
+function AgentSettingsRow({ arena, agent }: { arena: ArenaPublic; agent: AgentPublic }) {
   const [state, action, pending] = useActionState<FormState, FormData>(removeAgentAction, {});
+  const [confirming, setConfirming] = useState(false);
+  const removeButton = useRef<HTMLButtonElement>(null);
+  const cancelButton = useRef<HTMLButtonElement>(null);
+  const restoreFocus = useRef(false);
   useRefreshOnSuccess(state);
+
+  useEffect(() => {
+    if (confirming) cancelButton.current?.focus();
+    else if (restoreFocus.current) {
+      restoreFocus.current = false;
+      removeButton.current?.focus();
+    }
+  }, [confirming]);
+
   return (
-    <form action={action} className="flex items-center gap-2">
-      <input type="hidden" name="slug" value={arena.slug} />
-      <input type="hidden" name="key" value={agent.key} />
-      <input type="hidden" name="agentId" value={agent.id} />
-      {state.error ? <span className="text-xs text-error">{state.error}</span> : null}
-      <button type="submit" className="pixel-button text-xs" disabled={pending} aria-label={`Remove ${agent.displayName}`}>
-        Remove
-      </button>
-    </form>
+    <li className="text-sm" data-settings-agent={agent.key}>
+      <form action={action} onSubmit={(event) => { if (!confirming || pending) event.preventDefault(); }}>
+        <input type="hidden" name="slug" value={arena.slug} />
+        <input type="hidden" name="key" value={agent.key} />
+        <input type="hidden" name="agentId" value={agent.id} />
+        <div className="flex items-center gap-3">
+          <span className="min-w-0 flex-1 wrap-anywhere">
+            {agent.displayName} <code className="text-muted">({agent.key})</code>
+          </span>
+          {!confirming ? (
+            <button ref={removeButton} type="button" className="pixel-button text-xs" aria-label={`Remove ${agent.displayName}`} onClick={() => setConfirming(true)}>
+              Remove
+            </button>
+          ) : null}
+        </div>
+        {confirming ? (
+          <div className="mt-2 flex flex-wrap items-center gap-2 border border-line bg-ink p-2">
+            <p className="w-full wrap-anywhere">Remove {agent.displayName} (<code>{agent.key}</code>) from this arena?</p>
+            <button
+              ref={cancelButton}
+              type="button"
+              className="pixel-button text-xs"
+              disabled={pending}
+              onClick={() => {
+                restoreFocus.current = true;
+                setConfirming(false);
+              }}
+            >
+              Cancel
+            </button>
+            <button type="submit" className="pixel-button text-xs text-error" disabled={pending}>
+              {pending ? "Removing…" : "Confirm removal"}
+            </button>
+          </div>
+        ) : null}
+        {state.error ? <p role="alert" className="mt-2 text-xs text-error">{state.error}</p> : null}
+      </form>
+    </li>
   );
 }
 
@@ -105,7 +147,7 @@ export function SettingsForms({
         <h2 className="mb-3 font-pixel text-lg">Name and theme</h2>
         <RenameForm key={`${arena.name}-${arena.theme}`} arena={arena} />
       </section>
-      <section className="pixel-panel p-5">
+      <section id="api-keys" className="pixel-panel p-5">
         <h2 className="mb-3 font-pixel text-lg">API keys{keys ? ` · ${keys.length}` : ""}</h2>
         {keys ? (
           <ApiKeys slug={arena.slug} keys={keys} />
@@ -120,12 +162,7 @@ export function SettingsForms({
         ) : (
           <ul className="flex flex-col gap-2">
             {agents.map((agent) => (
-              <li key={agent.id} className="flex items-center gap-3 text-sm" data-settings-agent={agent.key}>
-                <span className="min-w-0 flex-1 truncate">
-                  {agent.displayName} <span className="text-muted">({agent.key})</span>
-                </span>
-                <RemoveAgentButton arena={arena} agent={agent} />
-              </li>
+              <AgentSettingsRow key={agent.id} arena={arena} agent={agent} />
             ))}
           </ul>
         )}

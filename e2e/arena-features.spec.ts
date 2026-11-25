@@ -91,7 +91,7 @@ test("narrow rooms support jumps to both destinations and keep their position th
     const farAgent = room.getByRole("button", { name: /^Second:/ });
     await expect(farAgent).toBeInViewport();
     await farAgent.click();
-    const drawer = page.getByRole("complementary", { name: "Second details" });
+    const drawer = page.getByRole("dialog", { name: "Second details" });
     await expect(drawer).toBeVisible();
     await drawer.getByRole("button", { name: "Close" }).click();
     await toStations.click();
@@ -119,7 +119,7 @@ test("agent links survive login and delayed loading and can be copied or selecte
     await route.continue();
   });
   const path = "/arenas/linked?from=review&agent=brief%2Ewriter";
-  const drawer = page.getByRole("complementary", { name: "Brief Writer details" });
+  const drawer = page.getByRole("dialog", { name: "Brief Writer details" });
   try {
     await page.goto(path);
     const loginUrl = new URL(page.url());

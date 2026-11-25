@@ -58,6 +58,7 @@ function withNewestPresence(incoming: AgentPublic, held: AgentPublic | undefined
 export type LiveAction =
   | { type: "message"; message: StreamMessage; clientNowMs: number }
   | { type: "disconnected" }
+  | { type: "retry" }
   | { type: "failed" };
 
 export function liveReducer(state: LiveState, action: LiveAction): LiveState {
@@ -65,6 +66,7 @@ export function liveReducer(state: LiveState, action: LiveAction): LiveState {
     return state.connection === "reconnecting" ? state : { ...state, connection: "reconnecting" };
   }
   if (action.type === "failed") return { ...state, connection: "failed" };
+  if (action.type === "retry") return { ...state, connection: state.hasSnapshot ? "reconnecting" : "connecting" };
   const msg = action.message;
   if (msg.type !== "snapshot" && "seq" in msg && msg.seq <= state.snapshotSeq) return state;
   switch (msg.type) {

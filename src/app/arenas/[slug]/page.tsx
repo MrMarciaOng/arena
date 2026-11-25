@@ -17,5 +17,5 @@ async function ArenaFromParams({ params }: Pick<PageProps<"/arenas/[slug]">, "pa
   const { slug } = await params;
   // A slug the API would reject (e.g. "/arenas/Career") can never load; don't open a stream for it.
   if (!slugSchema.safeParse(slug).success) notFound();
-  return <ArenaView slug={slug} />;
+  return <ArenaView key={slug} slug={slug} />;
 }

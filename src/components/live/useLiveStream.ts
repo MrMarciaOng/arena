@@ -12,8 +12,9 @@ import { initialLiveState, liveReducer, type LiveState } from "@/lib/live-state"
  * connection; if the server refuses the connection outright (EventSource stays closed), we check
  * whether the session expired and retry.
  */
-export function useLiveStream(arenas: string[] | null): LiveState {
+export function useLiveStream(arenas: string[] | null): LiveState & { retry: () => void } {
   const [state, dispatch] = useReducer(liveReducer, initialLiveState);
+  const [attempt, nextAttempt] = useReducer((current: number) => current + 1, 0);
   const router = useRouter();
   const query = arenas ? `?arenas=${encodeURIComponent(arenas.join(","))}` : "";
 
@@ -47,7 +48,9 @@ export function useLiveStream(arenas: string[] | null): LiveState {
             void res.body?.cancel();
             if (stopped) return;
             if (res.status === 401) {
-              router.replace(`/login?next=${encodeURIComponent(window.location.pathname)}`);
+              stopped = true;
+              const { pathname, search, hash } = window.location;
+              router.replace(`/login?next=${encodeURIComponent(pathname + search + hash)}`);
               return;
             }
             // A request the server will never accept (bad slug, no permission): stop retrying.
@@ -69,9 +72,15 @@ export function useLiveStream(arenas: string[] | null): LiveState {
       clearTimeout(retryTimer);
       source?.close();
     };
-  }, [query, router]);
+  }, [attempt, query, router]);
 
-  return state;
+  return {
+    ...state,
+    retry() {
+      dispatch({ type: "retry" });
+      nextAttempt();
+    },
+  };
 }
 
 /** Re-renders every `intervalMs` so presence ("away", "last seen") stays current without server events. */

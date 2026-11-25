@@ -87,9 +87,6 @@ export function AgentList({
     const g = groupOf(agent);
     byGroup.set(g, [...(byGroup.get(g) ?? []), agent]);
   }
-  if (agents.length === 0) {
-    return <p className="text-sm text-muted">No agents in this arena yet.</p>;
-  }
   return (
     <div className="flex flex-col gap-5">
       {GROUPS.filter((g) => byGroup.has(g)).map((group) => (
