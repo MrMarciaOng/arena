@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { connection } from "next/server";
-import { isOwner } from "@/server/auth";
+import { getOwnerSession } from "@/server/auth";
 import { logoutAction } from "@/server/actions";
 import { ownerLoginEnabled } from "@/server/env";
 
@@ -9,9 +9,9 @@ export async function SessionControls() {
   // The configuration is read per request; without this it could be prerendered from build-time env.
   await connection();
   if (!ownerLoginEnabled()) {
-    return <span className="text-xs text-muted">read-only · no owner password set</span>;
+    return <span className="text-xs text-muted">read-only · owner login is off</span>;
   }
-  if (await isOwner()) {
+  if (await getOwnerSession()) {
     return (
       <form action={logoutAction}>
         <button className="pixel-button text-xs" type="submit">

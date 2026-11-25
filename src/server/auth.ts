@@ -1,17 +1,22 @@
 import "server-only";
 import { cookies } from "next/headers";
+import { cache } from "react";
+import { legacyArenaOwner, type ArenaOwner } from "./arena-owner";
 import type { ArenaRow } from "./db/schema";
-import { anonymousReadAllowed, getEnv, ownerLoginEnabled } from "./env";
+import { anonymousReadAllowed, getEnv, passwordSessionKeys, type Env } from "./env";
 import { ApiError, forbidden, unauthorized } from "./errors";
 import { findKeyByHash, touchKey } from "./keys";
 import { takeRequest } from "./rate-limit";
-import { SESSION_COOKIE, verifySessionExpiry } from "./session";
+import { secureSessionCookie, SESSION_COOKIE, verifySessionExpiry } from "./session";
+import { createSupabaseAuthClient, readSupabaseSession, supabaseCookieStore } from "./supabase-auth";
 import { hashToken, secretsEqual } from "./tokens";
+
+type OwnerSession = ArenaOwner & { kind: "owner"; expiresAt: number };
 
 export type Credential =
   | { kind: "admin"; rateKey: string }
   | { kind: "ingest"; arenaId: string; keyId: string; rateKey: string }
-  | { kind: "owner"; expiresAt: number }
+  | OwnerSession
   | { kind: "anonymous" }
   | { kind: "none" };
 
@@ -51,29 +56,28 @@ export async function resolveBearer(req: Request, { charge = true }: { charge?: 
   return cred;
 }
 
-/** The owner session's expiry if `value` is a valid session cookie, else null. */
-export async function ownerSessionExpiry(value: string | undefined, nowMs = Date.now()): Promise<number | null> {
-  const env = getEnv();
-  if (!ownerLoginEnabled(env)) return null;
-  return verifySessionExpiry(
-    value,
-    { secret: env.ARENA_SESSION_SECRET!, password: env.ARENA_OWNER_PASSWORD! },
-    nowMs,
-  );
-}
-
-export async function isOwnerSessionValue(value: string | undefined, nowMs = Date.now()): Promise<boolean> {
-  return (await ownerSessionExpiry(value, nowMs)) !== null;
-}
-
 /** Credentials for reads: a Bearer token if present, else the owner cookie, else anonymous if allowed. */
 export async function resolveReader(req: Request): Promise<Credential> {
   const bearer = await resolveBearer(req);
   if (bearer.kind !== "none") return bearer;
-  const expiresAt = await ownerSessionExpiry(readCookie(req, SESSION_COOKIE));
-  if (expiresAt !== null) return { kind: "owner", expiresAt };
-  if (anonymousReadAllowed()) return { kind: "anonymous" };
-  return { kind: "none" };
+  const env = getEnv();
+  if (env.ARENA_AUTH_PROVIDER === "supabase") {
+    const client = createSupabaseAuthClient(env, {
+      cookies: supabaseCookieStore(await cookies(), true),
+      secure: secureSessionCookie(env, req.headers, new URL(req.url).protocol),
+    });
+    const session = await readSupabaseSession(client);
+    return session ? { kind: "owner", ...session } : { kind: "none" };
+  }
+  const session = await readPasswordSession(env, readCookie(req, SESSION_COOKIE));
+  return session ?? { kind: anonymousReadAllowed(env) ? "anonymous" : "none" };
+}
+
+async function readPasswordSession(env: Env, value: string | undefined): Promise<OwnerSession | null> {
+  const keys = passwordSessionKeys(env);
+  if (!keys) return null;
+  const expiresAt = await verifySessionExpiry(value, keys, Date.now());
+  return expiresAt === null ? null : { kind: "owner", ...legacyArenaOwner, expiresAt };
 }
 
 /** A malformed cookie reads as no cookie: it must fall through to 401 or anonymous, never a 500. */
@@ -102,6 +106,13 @@ export function assertCanReadAll(cred: Credential) {
   if (cred.kind === "ingest") throw forbidden("an arena token can only read its own arena");
 }
 
+/** Ownership scope for reads once the caller has passed the endpoint's credential check. */
+export function readerArenaOwner(cred: Credential): ArenaOwner | undefined {
+  if (cred.kind === "owner") return cred;
+  if (cred.kind === "anonymous") return legacyArenaOwner;
+  return undefined;
+}
+
 export function assertCanIngest(cred: Credential, arena: ArenaRow) {
   if (cred.kind === "admin") return;
   if (cred.kind === "ingest") {
@@ -128,23 +139,23 @@ async function rateLimit(cred: Credential, nowMs = Date.now()) {
   }
 }
 
-/**
- * For Server Actions. Next's Origin check only stops cross-site calls, so every action
- * proves the caller is the owner here before changing anything.
- */
-export async function requireOwner(): Promise<void> {
-  const store = await cookies();
-  if (!(await isOwnerSessionValue(store.get(SESSION_COOKIE)?.value))) {
+/** Server Actions use the authenticated account to scope all changes. */
+export async function requireOwner(): Promise<ArenaOwner> {
+  const session = await getOwnerSession();
+  if (!session) {
     throw new ApiError(401, "unauthorized", "log in as the owner to do that");
   }
+  return session;
 }
 
-export async function isOwner(): Promise<boolean> {
+export const getOwnerSession = cache(async function getOwnerSession(): Promise<OwnerSession | null> {
+  const env = getEnv();
   const store = await cookies();
-  return isOwnerSessionValue(store.get(SESSION_COOKIE)?.value);
-}
-
-/** Who may see arena data in a page: the owner, or anyone when anonymous reading is on. */
-export async function canReadPages(): Promise<boolean> {
-  return anonymousReadAllowed() || (await isOwner());
-}
+  if (env.ARENA_AUTH_PROVIDER === "supabase") {
+    // Proxy refreshes the session before page rendering or a Server Action.
+    const client = createSupabaseAuthClient(env, { cookies: supabaseCookieStore(store, false), secure: true });
+    const session = await readSupabaseSession(client);
+    return session ? { kind: "owner", ...session } : null;
+  }
+  return readPasswordSession(env, store.get(SESSION_COOKIE)?.value);
+});

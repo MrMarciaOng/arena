@@ -1,5 +1,5 @@
 // Relative imports only: drizzle-kit loads this file without the "@/" alias.
-import { bigint, boolean, doublePrecision, index, integer, jsonb, pgTable, primaryKey, text, uniqueIndex } from "drizzle-orm/pg-core";
+import { bigint, boolean, doublePrecision, index, integer, jsonb, pgTable, primaryKey, text, uniqueIndex, uuid } from "drizzle-orm/pg-core";
 import {
   EVENT_TYPES,
   STATUSES,
@@ -17,12 +17,13 @@ const ms = (name: string) => bigint(name, { mode: "number" });
 export const arenas = pgTable("arenas", {
   id: text("id").primaryKey(),
   slug: text("slug").notNull().unique(),
+  ownerUserId: uuid("owner_user_id"),
   name: text("name").notNull(),
   theme: text("theme", { enum: THEMES }).notNull(),
   version: ms("version").notNull(),
   createdAt: ms("created_at").notNull(),
   updatedAt: ms("updated_at").notNull(),
-});
+}, (t) => [index("arenas_owner_user_id").on(t.ownerUserId)]);
 
 export const agents = pgTable(
   "agents",
@@ -126,10 +127,11 @@ export const changes = pgTable(
   {
     seq: ms("seq").primaryKey(),
     arenaId: text("arena_id").notNull(),
+    ownerUserId: uuid("owner_user_id"),
     message: jsonb("message").$type<StreamMessage>().notNull(),
     createdAt: ms("created_at").notNull(),
   },
-  (t) => [index("changes_created_at").on(t.createdAt)],
+  (t) => [index("changes_created_at").on(t.createdAt), index("changes_owner_seq").on(t.ownerUserId, t.seq)],
 );
 
 /** Per-token request counts in fixed windows, shared by every server instance. */

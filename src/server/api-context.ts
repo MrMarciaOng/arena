@@ -1,7 +1,7 @@
 import "server-only";
 import { slugSchema } from "@/lib/schemas";
 import { getArena } from "./arenas";
-import { assertAdmin, assertCanIngest, assertCanReadArena, resolveBearer, resolveReader, type Credential } from "./auth";
+import { assertAdmin, assertCanIngest, assertCanReadArena, readerArenaOwner, resolveBearer, resolveReader, type Credential } from "./auth";
 import type { ArenaRow } from "./db/schema";
 import { unauthorized } from "./errors";
 import { discardBody, parseWith, readJson } from "./http";
@@ -53,7 +53,7 @@ export async function adminWrite<R>(req: Request, body: "json" | "none", write: 
 export async function readContext(req: Request, slug: string): Promise<{ cred: Credential; arena: ArenaRow }> {
   const cred = await resolveReader(req);
   if (cred.kind === "none") throw unauthorized();
-  const arena = await getArena(slug);
+  const arena = await getArena(slug, readerArenaOwner(cred));
   assertCanReadArena(cred, arena);
   return { cred, arena };
 }

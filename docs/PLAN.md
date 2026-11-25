@@ -103,13 +103,14 @@ All JSON. Errors look like `{ "error": { "code": "validation_failed", "message":
 |---|---|---|
 | **Admin token** (`ARENA_ADMIN_TOKEN` env) | `Authorization: Bearer` | everything over the API |
 | **Arena API key** (any number per arena, named, copyable by the owner at any time, revocable one by one) | `Authorization: Bearer` | register, report, heartbeat and remove agents in **that arena only**; read that arena |
-| **Owner session** (password login, signed httpOnly cookie) | cookie | read everything; UI mutations through Server Actions, each of which checks the session itself |
+| **Supabase account session** | cookie | read and manage up to eight arenas owned by the account |
+| **Legacy owner session** (password login) | cookie | read and manage arenas without an assigned Supabase account |
 
 - Route handlers that write accept **Bearer tokens only**, never cookies, so cookie-based CSRF against the API is impossible.
-- UI mutations (create arena, create, copy and revoke API keys, rename, change theme, remove agent, acknowledge) go through Server Actions. **Every Server Action verifies the signed owner session itself.** Next's `Origin` check stops cross-site calls but says nothing about who is calling, and `proxy.ts` is not an auth boundary for actions. This matters most with anonymous read on, where any visitor can load the page.
+- UI mutations (create arena, create, copy and revoke API keys, rename, change theme, remove agent, acknowledge) go through Server Actions. Each action verifies the session and scopes the operation to the authenticated owner's arenas.
 - **`proxy.ts` only gates pages.** A page request without an owner cookie redirects to `/login`, which is exempt. The proxy's matcher excludes `/api/*` (a matched request would have its body buffered, up to 10 MB, before any handler check): each API handler resolves its own credential (admin Bearer, arena API key Bearer, or owner cookie for reads) and returns a JSON 401/403. That way an arena API key can read its own arena over the API, and `/api/health` stays open.
-- Reading without a login needs `ARENA_ALLOW_ANONYMOUS_READ=1` in **every** environment; having no password set does not open reads, so a dev server on a LAN or tailnet doesn't leak answers. In production the app **refuses to start** without `ARENA_OWNER_PASSWORD` unless anonymous read is on; in development it starts with a warning. With anonymous read on, visitors can read, but every mutation still needs the owner session.
-- **Login:** the password is compared in constant time. Failed attempts are throttled to 5 per minute per client and 20 per minute overall, with a short lockout, counted in Postgres so the limit holds across instances. The client is identified by `X-Forwarded-For` only when `ARENA_TRUST_PROXY=1` says a proxy in front overwrites it; otherwise a caller could forge a new address per attempt, so all clients share one bucket. The return path after login is resolved like a browser would and must stay on the site. The session cookie is HMAC-signed with `ARENA_SESSION_SECRET`, `httpOnly`, `SameSite=Lax`, `Secure` in production (unless `ARENA_INSECURE_COOKIE=1` for a plain-HTTP LAN or tailnet), and expires after 30 days. A live stream opened with the cookie ends when the session does.
+- `ARENA_ALLOW_ANONYMOUS_READ=1` enables public reads of legacy arenas in password mode. Supabase mode requires an account for browser access.
+- **Login:** Supabase mode uses email and password with verified JWT claims. Password mode compares the configured password in constant time and signs a 30-day cookie with `ARENA_SESSION_SECRET`. Both modes throttle failed attempts in Postgres, use `httpOnly` cookies, and restrict the return path to the app. A cookie-authenticated stream reconnects when the session expires.
 - Keys: 32 random bytes, prefixed `arena_` so secret scanners catch them, looked up by SHA-256 hash, and stored sealed for copying (see "API key" above).
 - Limits: request body ≤ 256 KB (413); 100 agents per arena; a rate limit of 200 requests per 10-second window per token, counted in Postgres (429 with `Retry-After`).
 
@@ -119,7 +120,7 @@ All JSON. Errors look like `{ "error": { "code": "validation_failed", "message":
 |---|---|---|---|
 | GET | `/api/health` | none | liveness |
 | GET | `/api/arenas` | owner / admin | list arenas with status counts (`working`, `waiting`, `needsYou`, `done`, `error`, `idle`) plus `away` |
-| POST | `/api/arenas` | admin | create `{ slug, name, theme }` → `{ arena, apiKey: { id, name, prefix, token, ... } }` (its first key, named `default`) |
+| POST | `/api/arenas` | admin | create `{ slug, name, theme, ownerUserId? }` → `{ arena, apiKey: { id, name, prefix, token, ... } }` (its first key, named `default`) |
 | GET | `/api/arenas/:slug` | owner / admin / ingest(own) | snapshot: `{ arena, agents[], serverTime }` |
 | PATCH | `/api/arenas/:slug` | admin | rename, change theme |
 | DELETE | `/api/arenas/:slug` | admin | delete the arena with its agents and events |
@@ -134,7 +135,7 @@ All JSON. Errors look like `{ "error": { "code": "validation_failed", "message":
 | POST | `/api/arenas/:slug/agents/:key/status` | ingest | report state (auto-registers); → `{ applied, agent }` |
 | POST | `/api/arenas/:slug/agents/:key/heartbeat` | ingest | refresh `lastSeenAt` (and optionally `ttlSeconds`). `{"leaving": true}` marks the agent away now without touching its status or answer; → `204` |
 | GET | `/api/arenas/:slug/events` | read | history, `?agent=&before=&limit=` (cursor on `id`, newest first) |
-| GET | `/api/stream` | owner / admin | SSE; `?arenas=career,personal` (all arenas if omitted) |
+| GET | `/api/stream` | owner / admin | SSE over accessible arenas. Filter with `?arenas=career,personal` |
 | GET | `/api/cron/maintenance` | `CRON_SECRET` bearer | daily cleanup, called by Vercel Cron |
 
 `slug` and `key` match `^[a-z0-9][a-z0-9._-]{0,63}$`. The slug `new` is reserved, because `/arenas/new` is the creation page.

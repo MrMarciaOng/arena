@@ -179,9 +179,9 @@ async function insertAgent(
 /** Records the change for live dashboards: the whole agent if it changed, else just its presence. */
 async function emitAgent(tx: Tx, arena: ArenaRow, row: AgentRow, changed: boolean, nowMs: number): Promise<void> {
   if (changed) {
-    await emit(tx, arena.id, { type: "agent.upserted", seq: row.version, agent: toAgentPublic(row, arena.slug) }, nowMs);
+    await emit(tx, arena, { type: "agent.upserted", seq: row.version, agent: toAgentPublic(row, arena.slug) }, nowMs);
   } else {
-    await emit(tx, arena.id, toPresence(row, await nextSeq(tx)), nowMs);
+    await emit(tx, arena, toPresence(row, await nextSeq(tx)), nowMs);
   }
 }
 
@@ -388,7 +388,7 @@ export async function removeAgent(arenaRef: ArenaRow, key: string, nowMs: number
       agentVersion: seq,
       createdAt: nowMs,
     });
-    await emit(tx, arena.id, { type: "agent.removed", seq, arenaId: arena.id, agentId: current.id, key }, nowMs);
+    await emit(tx, arena, { type: "agent.removed", seq, arenaId: arena.id, agentId: current.id, key }, nowMs);
     return arena.id;
   });
   await maybePruneArena(arenaId, nowMs);

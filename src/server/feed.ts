@@ -1,8 +1,9 @@
 import "server-only";
-import { asc, gt, lt, sql } from "drizzle-orm";
+import { and, asc, gt, lt, sql } from "drizzle-orm";
 import type { StreamMessage } from "@/lib/domain";
-import { getDb, rowsOf, writeTx, type Db, type Tx } from "./db/client";
-import { changes, counters } from "./db/schema";
+import { arenaOwnerFilter, type ArenaOwner } from "./arena-owner";
+import { getDb, rowsOf, writeTx, type Tx } from "./db/client";
+import { changes, counters, type ArenaRow } from "./db/schema";
 
 /** A change the dashboards should see, numbered by the global counter. */
 export type FeedMessage = Exclude<StreamMessage, { type: "snapshot" } | { type: "reconnect" }>;
@@ -14,8 +15,8 @@ export const FEED_RETENTION_MS = 60 * 60 * 1000;
  * Records a change in the live-update feed. Call inside writeTx(), after taking the message's
  * seq from nextSeq(), so the feed commits with the change and in counter order.
  */
-export async function emit(tx: Tx, arenaId: string, message: FeedMessage, nowMs: number): Promise<void> {
-  await tx.insert(changes).values({ seq: message.seq, arenaId, message, createdAt: nowMs });
+export async function emit(tx: Tx, arena: Pick<ArenaRow, "id" | "ownerUserId">, message: FeedMessage, nowMs: number): Promise<void> {
+  await tx.insert(changes).values({ seq: message.seq, arenaId: arena.id, ownerUserId: arena.ownerUserId, message, createdAt: nowMs });
 }
 
 /**
@@ -25,13 +26,13 @@ export async function emit(tx: Tx, arenaId: string, message: FeedMessage, nowMs:
 export async function readChanges(
   after: number,
   limit: number,
-  db?: Db,
+  owner?: ArenaOwner,
 ): Promise<{ messages: FeedMessage[]; gap: boolean }> {
-  const conn = db ?? (await getDb());
+  const conn = await getDb();
   const rows = await conn
     .select({ message: changes.message })
     .from(changes)
-    .where(gt(changes.seq, after))
+    .where(and(gt(changes.seq, after), arenaOwnerFilter(changes.ownerUserId, owner)))
     .orderBy(asc(changes.seq))
     .limit(limit);
   // Read after the rows: if pruning removed anything newer than the cursor, this now says so.

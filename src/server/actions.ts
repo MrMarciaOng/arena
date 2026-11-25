@@ -6,12 +6,14 @@ import { z } from "zod";
 import { safeNext } from "@/lib/safe-next";
 import { slugSchema } from "@/lib/schemas";
 import { acknowledgeAgent } from "./agents";
+import type { ArenaOwner } from "./arena-owner";
 import { findArena } from "./arenas";
 import { requireOwner } from "./auth";
-import { getEnv, ownerLoginEnabled } from "./env";
+import { getEnv, ownerLoginEnabled, passwordSessionKeys } from "./env";
 import { ApiError } from "./errors";
 import { loginRetryAfter, recordLoginFailure } from "./rate-limit";
-import { createSessionValue, SESSION_COOKIE, SESSION_TTL_MS } from "./session";
+import { createSessionValue, secureSessionCookie, SESSION_COOKIE, SESSION_TTL_MS } from "./session";
+import { signInWithSupabase, signOutFromSupabase } from "./supabase-auth";
 import { secretsEqual } from "./tokens";
 
 // Every action that changes data calls requireOwner() first. Next checks the Origin of action
@@ -19,10 +21,9 @@ import { secretsEqual } from "./tokens";
 
 export type ActionResult<T = object> = ({ ok: true } & T) | { ok: false; error: string; code: string };
 
-async function asOwner<T>(fn: () => T | Promise<T>): Promise<T | { ok: false; error: string; code: string }> {
+async function asOwner<T>(fn: (owner: ArenaOwner) => T | Promise<T>): Promise<T | { ok: false; error: string; code: string }> {
   try {
-    await requireOwner();
-    return await fn();
+    return await fn(await requireOwner());
   } catch (err) {
     if (err instanceof ApiError) return { ok: false, error: err.message, code: err.code };
     throw err;
@@ -54,20 +55,24 @@ export async function loginAction(_prev: LoginState, form: FormData): Promise<Lo
   if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.` };
 
   const password = form.get("password");
-  if (typeof password !== "string" || !secretsEqual(password, env.ARENA_OWNER_PASSWORD!)) {
+  const secure = secureSessionCookie(env, h);
+  if (env.ARENA_AUTH_PROVIDER === "supabase") {
+    const email = form.get("email");
+    if (typeof email === "string" && typeof password === "string" &&
+        await signInWithSupabase(env, { store: await cookies(), secure, email: email.trim(), password })) {
+      redirect(safeNext(form.get("next")));
+    }
+    await recordLoginFailure(client, now);
+    return { error: "Wrong email or password." };
+  }
+
+  const keys = passwordSessionKeys(env);
+  if (!keys || typeof password !== "string" || !secretsEqual(password, keys.password)) {
     await recordLoginFailure(client, now);
     return { error: "Wrong password." };
   }
 
-  const value = await createSessionValue(
-    { secret: env.ARENA_SESSION_SECRET!, password: env.ARENA_OWNER_PASSWORD! },
-    now,
-  );
-  // Secure whenever the login itself came over HTTPS, and always in production unless plain HTTP
-  // is explicitly allowed (ARENA_INSECURE_COOKIE=1). Browsers accept Secure cookies on
-  // http://localhost, so local production builds still work.
-  const overHttps = (h.get("origin") ?? "").startsWith("https:") || h.get("x-forwarded-proto") === "https";
-  const secure = overHttps || (env.NODE_ENV === "production" && env.ARENA_INSECURE_COOKIE !== "1");
+  const value = await createSessionValue(keys, now);
   (await cookies()).set(SESSION_COOKIE, value, {
     httpOnly: true,
     sameSite: "lax",
@@ -79,7 +84,12 @@ export async function loginAction(_prev: LoginState, form: FormData): Promise<Lo
 }
 
 export async function logoutAction(): Promise<void> {
-  (await cookies()).delete(SESSION_COOKIE);
+  const env = getEnv();
+  const store = await cookies();
+  if (env.ARENA_AUTH_PROVIDER === "supabase") {
+    await signOutFromSupabase(env, { store, secure: secureSessionCookie(env, await headers()) });
+  }
+  store.delete(SESSION_COOKIE);
   redirect("/login");
 }
 
@@ -94,10 +104,10 @@ export async function acknowledgeAction(input: {
   key: string;
   version: number;
 }): Promise<ActionResult<{ status: "acknowledged" | "stale" | "not_done" }>> {
-  return asOwner(async () => {
+  return asOwner(async (owner) => {
     const parsed = ackInput.safeParse(input);
     if (!parsed.success) return { ok: false as const, error: "invalid input", code: "validation_failed" };
-    const arena = await findArena(parsed.data.slug);
+    const arena = await findArena(parsed.data.slug, owner);
     if (!arena) return { ok: false as const, error: "arena not found", code: "not_found" };
     const result = await acknowledgeAgent(arena, parsed.data.key, parsed.data.version, Date.now());
     return { ok: true as const, status: result.ok ? ("acknowledged" as const) : result.reason };

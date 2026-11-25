@@ -1,6 +1,7 @@
 import "server-only";
-import { asc, inArray } from "drizzle-orm";
+import { and, asc, inArray } from "drizzle-orm";
 import type { StreamSnapshot } from "@/lib/domain";
+import { arenaOwnerFilter, type ArenaOwner } from "./arena-owner";
 import { currentSeq, getDb } from "./db/client";
 import { agents, arenas } from "./db/schema";
 import { toAgentPublic, toArenaPublic } from "./serialize";
@@ -11,15 +12,14 @@ import { toAgentPublic, toArenaPublic } from "./serialize";
  * counter order, so every change numbered `seq` or lower is in this snapshot and every later one
  * has a higher number: the live stream continues from `seq` without gaps or repeats.
  */
-export async function readSnapshot(slugs: string[] | null, nowMs: number): Promise<StreamSnapshot> {
+export async function readSnapshot(slugs: string[] | null, nowMs: number, owner?: ArenaOwner): Promise<StreamSnapshot> {
   const db = await getDb();
   return db.transaction(
     async (tx) => {
       const seq = await currentSeq(tx);
-      const arenaRows = await (slugs
-        ? tx.select().from(arenas).where(inArray(arenas.slug, slugs))
-        : tx.select().from(arenas)
-      ).orderBy(asc(arenas.createdAt));
+      const arenaRows = await tx.select().from(arenas)
+        .where(and(slugs ? inArray(arenas.slug, slugs) : undefined, arenaOwnerFilter(arenas.ownerUserId, owner)))
+        .orderBy(asc(arenas.createdAt));
       const slugById = new Map(arenaRows.map((a) => [a.id, a.slug]));
       const agentRows =
         arenaRows.length === 0

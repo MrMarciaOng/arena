@@ -5,8 +5,9 @@ import { Suspense } from "react";
 import { SettingsForms } from "@/components/settings/SettingsForms";
 import { listAgents } from "@/server/agents";
 import { findArena } from "@/server/arenas";
-import { canReadPages, isOwner } from "@/server/auth";
-import { ownerLoginEnabled } from "@/server/env";
+import { legacyArenaOwner } from "@/server/arena-owner";
+import { getOwnerSession } from "@/server/auth";
+import { anonymousReadAllowed, ownerLoginEnabled } from "@/server/env";
 import { listKeys } from "@/server/keys";
 import { toArenaPublic } from "@/server/serialize";
 
@@ -22,10 +23,9 @@ async function Settings({ params }: Pick<PageProps<"/arenas/[slug]/settings">, "
   const { slug } = await params;
   // Read the database per request, never at build time.
   await connection();
-  // Same rule as the read API: the owner, or anyone when anonymous reading is on. Checked before
-  // touching the arena, so a refused visitor can't even tell whether it exists.
-  const owner = await isOwner();
-  if (!(await canReadPages())) {
+  const owner = await getOwnerSession();
+  const scope = owner ?? (anonymousReadAllowed() ? legacyArenaOwner : null);
+  if (!scope) {
     return (
       <div className="pixel-panel mx-auto max-w-xl p-6">
         <h1 className="font-pixel text-2xl">Owner only</h1>
@@ -38,13 +38,13 @@ async function Settings({ params }: Pick<PageProps<"/arenas/[slug]/settings">, "
               to see this arena&apos;s settings.
             </>
           ) : (
-            "Set ARENA_OWNER_PASSWORD and ARENA_SESSION_SECRET to log in and manage arenas here."
+            "Configure owner login to manage arenas here."
           )}
         </p>
       </div>
     );
   }
-  const arena = await findArena(slug);
+  const arena = await findArena(slug, scope);
   if (!arena) notFound();
   const [agents, keys] = await Promise.all([listAgents(arena), owner ? listKeys(arena) : null]);
   return (

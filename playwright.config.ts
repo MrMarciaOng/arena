@@ -7,6 +7,7 @@ export const E2E_ENV = {
   ARENA_ALLOW_EMBEDDED_DB: "1",
   ARENA_STREAM_POLL_MS: "200",
   ARENA_ADMIN_TOKEN: "e2e-admin-token-0123456789abcdef",
+  ARENA_AUTH_PROVIDER: "password",
   ARENA_OWNER_PASSWORD: "e2e-owner-password",
   ARENA_SESSION_SECRET: "e2e-session-secret-0123456789abcdef",
   ARENA_ALLOW_ANONYMOUS_READ: "0",

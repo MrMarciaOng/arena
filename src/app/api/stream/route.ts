@@ -1,7 +1,7 @@
 import { unstable_rethrow } from "next/navigation";
 import type { StreamMessage, StreamSnapshot } from "@/lib/domain";
 import { slugSchema } from "@/lib/schemas";
-import { assertCanReadAll, resolveReader, type Credential } from "@/server/auth";
+import { assertCanReadAll, readerArenaOwner, resolveReader, type Credential } from "@/server/auth";
 import { errorResponse, parseWith } from "@/server/http";
 import { readChanges, type FeedMessage } from "@/server/feed";
 import { isDraining, trackStream } from "@/server/shutdown";
@@ -106,10 +106,12 @@ export async function GET(req: Request) {
   if (isDraining()) return draining(req, started);
   let cred: Credential;
   let slugs: string[] | null;
+  let owner: ReturnType<typeof readerArenaOwner>;
   let snapshot: StreamSnapshot;
   try {
     ({ cred, slugs } = await authorize(req));
-    snapshot = await readSnapshot(slugs, Date.now());
+    owner = readerArenaOwner(cred);
+    snapshot = await readSnapshot(slugs, Date.now(), owner);
   } catch (err) {
     unstable_rethrow(err);
     const res = errorResponse(err);
@@ -178,11 +180,11 @@ export async function GET(req: Request) {
           if (closed) return;
           let more = false;
           try {
-            const { messages, gap } = await readChanges(cursor, FEED_BATCH);
+            const { messages, gap } = await readChanges(cursor, FEED_BATCH, owner);
             if (closed) return;
             if (gap) {
               // The feed was pruned past our cursor: start over from a fresh snapshot.
-              const fresh = await readSnapshot(slugs, Date.now());
+              const fresh = await readSnapshot(slugs, Date.now(), owner);
               if (closed) return;
               reset(fresh);
               cursor = fresh.seq;

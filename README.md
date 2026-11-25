@@ -11,9 +11,9 @@ In your Supabase project, open **Connect** and copy the **Session pooler** conne
 (port 5432). Fill in the database password and set `DATABASE_URL` in `.env.local`. If `.env` already
 sets `DATABASE_URL`, omit that variable from `.env.local`.
 
-Set `ARENA_OWNER_PASSWORD` and `ARENA_SESSION_SECRET` in `.env.local` to enable owner login.
-Set `ARENA_ADMIN_TOKEN` if you also need to manage arenas through the API. Use the variable
-names in `.env.example` as a reference.
+Set up [Supabase Auth](#sign-in-with-supabase-auth) for account login. If you develop offline,
+set `ARENA_OWNER_PASSWORD` and `ARENA_SESSION_SECRET` in `.env.local` to use password login.
+Set `ARENA_ADMIN_TOKEN` to manage arenas through the API.
 
 ```bash
 pnpm install
@@ -24,21 +24,37 @@ pnpm dev --hostname 127.0.0.1
 Open [Arena locally](http://127.0.0.1:3000), log in, and select **New arena** to create a workplace.
 For offline development or automated tests, Arena also supports [PGlite](https://pglite.dev).
 
+### Sign in with Supabase Auth
+
+1. In the Supabase dashboard, open **Authentication → Users**. Create confirmed accounts with an email and password for the people who need access.
+2. Set `ARENA_AUTH_PROVIDER=supabase`, `SUPABASE_URL`, and `SUPABASE_PUBLISHABLE_KEY`. Apply the settings in `.env.local` for development or in Vercel for a deployment.
+3. Keep the same `ARENA_ENCRYPTION_KEY` or `ARENA_SESSION_SECRET` so you can still copy existing API keys. For a new installation, set `ARENA_ENCRYPTION_KEY`.
+4. Run `pnpm db:migrate` and restart Arena. Open `/login` and enter your Supabase account's email and password.
+
+Each Supabase account can create and manage up to eight private arenas. Deleting an arena frees a slot. Manage accounts in **Authentication → Users**. [Supabase password-based authentication](https://supabase.com/docs/guides/auth/passwords)
+
+Existing arenas without an assigned Supabase user stay accessible in password mode and through the admin API. Supabase accounts start with an empty dashboard. To create an arena for a specific account through the admin API, include its Supabase User UID as `ownerUserId` in `POST /api/arenas`. The arena counts toward that account's limit.
+
+### Environment variables
+
 Set local values in `.env` or `.env.local`. On Vercel, use the project's environment variables.
 
 | Variable | What it does |
 |---|---|
 | `DATABASE_URL` | `postgres://...` (Supabase or any Postgres), or `pglite:<dir>` for an embedded database. Default `pglite:./data/pglite` |
 | `ARENA_ADMIN_TOKEN` | Bearer token for the admin API (create, rename and delete arenas; manage API keys). 24+ characters |
-| `ARENA_OWNER_PASSWORD` | Password for the web UI |
-| `ARENA_SESSION_SECRET` | Signs the login cookie. 32+ characters, required with a password |
+| `ARENA_AUTH_PROVIDER` | `supabase` for Supabase Auth or `password` for local password login. Default `password` |
+| `SUPABASE_URL` | Supabase project URL. Required in `supabase` mode |
+| `SUPABASE_PUBLISHABLE_KEY` | Supabase project publishable key. Required in `supabase` mode |
+| `ARENA_OWNER_PASSWORD` | Password for the web UI in `password` mode |
+| `ARENA_SESSION_SECRET` | Signs the cookie in `password` mode. 32+ characters, required with `ARENA_OWNER_PASSWORD` in that mode |
 | `ARENA_ENCRYPTION_KEY` | Encrypts stored API keys so they can be copied again. 32+ characters; defaults to `ARENA_SESSION_SECRET` |
 | `CRON_SECRET` | Lets Vercel Cron call the daily cleanup (`/api/cron/maintenance`). 16+ characters |
 | `ARENA_TRUST_PROXY` | `1` only behind a proxy that overwrites `X-Forwarded-For` (Vercel does); then failed logins are throttled per client |
 | `ARENA_INSECURE_COOKIE` | `1` lets the login cookie work over plain HTTP in production (self-hosted on a LAN without TLS) |
-| `ARENA_ALLOW_ANONYMOUS_READ` | `1` lets anyone who can reach the app read dashboards. Off by default |
+| `ARENA_ALLOW_ANONYMOUS_READ` | `1` makes legacy arenas readable without login in `password` mode. Off by default |
 
-Without a password (and without anonymous read) nobody can read the dashboard, and production refuses to start.
+Production requires owner login or `ARENA_ALLOW_ANONYMOUS_READ=1`.
 
 ## Report from an agent
 
@@ -135,7 +151,7 @@ It fills in `session` and `seq` for you and sends each agent's reports one at a 
 
 ## Deploy (Vercel + Supabase)
 
-1. **Create a Supabase project.** Arena only needs its Postgres database. In the dashboard, open
+1. **Create a Supabase project.** In the dashboard, open
    **Connect** and copy the **Transaction pooler** connection string (port 6543, host
    `*.pooler.supabase.com`), with your database password filled in. That pooler suits serverless
    functions, which open and drop connections all the time; Arena turns off prepared statements
@@ -143,7 +159,8 @@ It fills in `session` and `seq` for you and sends each agent's reports one at a 
 2. **Import the repository in Vercel** and set the environment variables for Production. Don't
    give Preview deployments the production `DATABASE_URL`: their builds would migrate it too.
    - `DATABASE_URL`: the pooler connection string
-   - `ARENA_ADMIN_TOKEN`, `ARENA_OWNER_PASSWORD`, `ARENA_SESSION_SECRET` (and optionally `ARENA_ENCRYPTION_KEY`)
+   - Owner login settings from [Sign in with Supabase Auth](#sign-in-with-supabase-auth)
+   - `ARENA_ADMIN_TOKEN`, `ARENA_ENCRYPTION_KEY`
    - `CRON_SECRET`: any random string of 16+ characters
    - `ARENA_TRUST_PROXY=1`: Vercel overwrites `X-Forwarded-For`, so failed logins can be throttled per client
 

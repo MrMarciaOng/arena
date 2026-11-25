@@ -29,6 +29,7 @@ export const LIMITS = {
   roleChars: 200,
   arenaNameChars: 80,
   metadataBytes: 4096,
+  arenasPerUser: 8,
   agentsPerArena: 100,
   keysPerArena: 50,
   keyNameChars: 40,

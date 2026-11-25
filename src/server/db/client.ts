@@ -125,7 +125,7 @@ export async function writeTx<T>(run: (tx: Tx) => Promise<T>): Promise<T> {
   return db.transaction(async (tx) => {
     await tx.execute(sql`SELECT ${schema.counters.value} FROM ${schema.counters} WHERE ${schema.counters.name} = 'seq' FOR UPDATE`);
     return run(tx);
-  });
+  }, { isolationLevel: "read committed" });
 }
 
 /** Takes the next value of the global change counter. Call inside writeTx(). */

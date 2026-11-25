@@ -1,8 +1,15 @@
 // Owner session cookie, signed with HMAC-SHA256 over Web Crypto so proxy.ts can verify it too.
 // No "server-only" import for the same reason.
+import type { Env } from "./env";
 
 export const SESSION_COOKIE = "arena_session";
 export const SESSION_TTL_MS = 30 * 24 * 60 * 60 * 1000;
+
+export function secureSessionCookie(env: Env, headers: Headers, protocol?: string): boolean {
+  return protocol === "https:" || (headers.get("origin") ?? "").startsWith("https:") ||
+    headers.get("x-forwarded-proto") === "https" ||
+    (env.NODE_ENV === "production" && env.ARENA_INSECURE_COOKIE !== "1");
+}
 
 const encoder = new TextEncoder();
 
