@@ -41,7 +41,14 @@ function clientAddress(h: Headers, trustProxy: boolean): string {
 }
 
 
-export type LoginState = { error?: string; sent?: string };
+/**
+ * `sent` is the address a sign-in link went to, at `sentAt`. `retryAfter` (seconds) is when another
+ * link can be requested, so the form can count down instead of failing.
+ */
+export type LoginState = { error?: string; email?: string; sent?: string; sentAt?: number; retryAfter?: number };
+
+/** Supabase refuses a second link to the same address within a minute. */
+const RESEND_AFTER_S = 60;
 
 /** This site's origin as the browser sees it. Next rejects actions whose Origin isn't this host. */
 function requestOrigin(h: Headers): string | null {
@@ -61,12 +68,15 @@ export async function loginAction(_prev: LoginState, form: FormData): Promise<Lo
   const client = clientAddress(h, env.ARENA_TRUST_PROXY === "1");
   const now = Date.now();
   const wait = await loginRetryAfter(client, now);
-  if (wait > 0) return { error: `Too many attempts. Try again in ${wait}s.` };
+  if (wait > 0) {
+    const email = form.get("email");
+    return { error: `Too many attempts. Try again in ${wait}s.`, retryAfter: wait, ...(typeof email === "string" && { email }) };
+  }
 
   const secure = secureSessionCookie(env, h);
   if (env.ARENA_AUTH_PROVIDER === "supabase") {
     const email = z.email().safeParse(String(form.get("email") ?? "").trim());
-    if (!email.success) return { error: "Enter a valid email address." };
+    if (!email.success) return { error: "Enter a valid email address.", email: String(form.get("email") ?? "") };
     const origin = requestOrigin(h);
     if (!origin) return { error: "Couldn't send the sign-in link. Try again." };
     // Every email sent counts toward the login throttle, so the form can't be used to flood an inbox.
@@ -79,11 +89,19 @@ export async function loginAction(_prev: LoginState, form: FormData): Promise<Lo
       email: email.data,
       redirectTo: redirectTo.toString(),
     });
-    if (result.ok) return { sent: email.data };
+    if (result.ok) return { sent: email.data, sentAt: now, retryAfter: RESEND_AFTER_S };
+    if (result.retryAfter) {
+      return {
+        error: `A link was just sent to this address. You can ask for another in ${result.retryAfter}s.`,
+        email: email.data,
+        retryAfter: result.retryAfter,
+      };
+    }
     return {
+      email: email.data,
       error: result.rateLimited
-        ? "Too many sign-in emails were sent. Try again later."
-        : "Couldn't send the sign-in link. Try again.",
+        ? "Too many sign-in emails were sent. Try again in a few minutes."
+        : "Couldn't send the sign-in link. Check the address and try again.",
     };
   }
 
@@ -112,7 +130,7 @@ export async function logoutAction(): Promise<void> {
     await signOutFromSupabase(env, { store, secure: secureSessionCookie(env, await headers()) });
   }
   store.delete(SESSION_COOKIE);
-  redirect("/login");
+  redirect("/login?signedOut=1");
 }
 
 const ackInput = z.strictObject({

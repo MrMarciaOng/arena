@@ -51,7 +51,13 @@ export function supabaseCookieStore(store: CookieStore, writable: boolean): Cook
   };
 }
 
-export type MagicLinkResult = { ok: true } | { ok: false; rateLimited: boolean };
+export type MagicLinkResult = { ok: true } | { ok: false; rateLimited: boolean; retryAfter?: number };
+
+/** Supabase says "you can only request this after 42 seconds" when the same email asks too soon. */
+function retryAfterSeconds(message: string): number | undefined {
+  const seconds = /after (\d+) seconds?/i.exec(message)?.[1];
+  return seconds ? Number(seconds) : undefined;
+}
 
 /**
  * Emails a sign-in link. Supabase creates the account on first use unless sign-ups are turned off
@@ -67,7 +73,8 @@ export async function sendSupabaseMagicLink(
   const client = createSupabaseAuthClient(env, { secure, cookies: supabaseCookieStore(store, true) });
   try {
     const { error } = await client.auth.signInWithOtp({ email, options: { emailRedirectTo: redirectTo } });
-    return error ? { ok: false, rateLimited: error.status === 429 } : { ok: true };
+    if (!error) return { ok: true };
+    return { ok: false, rateLimited: error.status === 429, retryAfter: retryAfterSeconds(error.message) };
   } catch {
     return { ok: false, rateLimited: false };
   }

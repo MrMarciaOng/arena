@@ -217,7 +217,7 @@ describe("Supabase accounts", () => {
   /** Requests a link from the login form, then opens it the way the email's token-hash link does. */
   async function signIn(email: keyof typeof accounts) {
     requestHeaders.set("origin", "https://arena.example.test");
-    expect(await loginAction({}, formData({ email, next: "/arenas/new" }))).toEqual({ sent: email });
+    expect(await loginAction({}, formData({ email, next: "/arenas/new" }))).toMatchObject({ sent: email, retryAfter: 60 });
     const link = new URL(sentLinks.at(-1)!.redirectTo);
     expect(link.origin + link.pathname).toBe("https://arena.example.test/auth/confirm");
     link.searchParams.set("token_hash", `hash-${email}`);
@@ -227,7 +227,8 @@ describe("Supabase accounts", () => {
   }
 
   it("rejects an invalid email and an invalid or expired sign-in link", async () => {
-    expect(await loginAction({}, formData({ email: "not-an-email" }))).toEqual({ error: "Enter a valid email address." });
+    expect(await loginAction({}, formData({ email: "not-an-email" })))
+      .toEqual({ error: "Enter a valid email address.", email: "not-an-email" });
     const link = new URL("https://arena.example.test/auth/confirm?token_hash=stale&type=email&next=/arenas/new");
     await expect(confirmSignIn(new NextRequest(link)))
       .rejects.toMatchObject({ to: "/login?error=link&next=%2Farenas%2Fnew" });
