@@ -146,7 +146,8 @@ It fills in `session` and `seq`, and sends each agent's reports one at a time in
    - `ARENA_TRUST_PROXY=1`
 
    Generate secrets with `node -e "console.log(require('crypto').randomBytes(32).toString('base64url'))"`. Don't give Preview deployments the production `DATABASE_URL`: their builds would migrate it too.
-3. **Deploy.** The build runs `pnpm db:migrate && pnpm build` (see `vercel.json`), so the schema is migrated before each new version goes live. The previous version keeps serving until then, so a migration must not break it: add columns and tables first, and drop old ones a release later.
+3. **Run functions next to the database.** Every page load reads Postgres several times in a row, so a function on another continent waits a full round trip for each read. `vercel.json` pins functions to `sin1` (Singapore), where this project's Supabase database is. If yours is elsewhere, change `regions` to the [Vercel region](https://vercel.com/docs/edge-network/regions) nearest it.
+4. **Deploy.** The build runs `pnpm db:migrate && pnpm build` (see `vercel.json`), so the schema is migrated before each new version goes live. The previous version keeps serving until then, so a migration must not break it: add columns and tables first, and drop old ones a release later.
 
 What to know once it is running:
 
