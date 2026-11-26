@@ -70,7 +70,28 @@ curl -X POST "$ARENA_URL/api/arenas/career/agents/resume-writer/status" \
 
 ## Integrations
 
-Each integration reads `ARENA_URL`, `ARENA_SLUG` (the arena) and `ARENA_TOKEN` (one of its API keys) from the environment. Keep `ARENA_TOKEN` out of anything you commit.
+The quickest way in is an arena's **Connect agents** page (the link next to **Settings**). Pick a key and a tool, then copy what it gives you:
+
+| Tool | What you copy |
+|---|---|
+| Claude Code | a command that installs the skill, or the hooks |
+| Codex | a command that installs the skill and Codex's `notify` |
+| Any AI assistant | a prompt that explains the API, with this arena's URL and key filled in |
+| Shell and cron | a command that installs the reporter, plus examples and a raw `curl` |
+
+The commands download the installer from the arena itself (`/api/connect/install.js`) and run it with Node 18+:
+
+```bash
+curl -fsSL https://your-arena/api/connect/install.js | ARENA_TOKEN='arena_…' node - skill --arena career
+```
+
+- **What it writes.** It saves the URL, slug and key in `~/.config/arena/env` (mode 600), which every integration below reads.
+- **Where things go.** Scripts go in `~/.config/arena/bin`, and the skill in `~/.claude/skills` and `~/.codex/skills`.
+- **Editing settings.** It backs up `~/.claude/settings.json` and `~/.codex/config.toml` before changing them. It leaves other hooks alone, and never replaces another `notify` program.
+- **Commands.** `skill`, `claude-hooks`, `codex` and `reporter` install those integrations; `uninstall` removes everything it added.
+- **Served files.** The same route serves `arena-report.mjs`, `arena-hook.mjs`, `arena-notify.mjs`, `SKILL.md` and `setup.md`. None of them holds a secret.
+
+The rest of this section sets the same integrations up by hand from a checkout. Each reads `ARENA_URL`, `ARENA_SLUG` (the arena) and `ARENA_TOKEN` (one of its API keys) from the environment. Keep `ARENA_TOKEN` out of anything you commit.
 
 ### Shell and cron
 

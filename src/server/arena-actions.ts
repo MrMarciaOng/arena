@@ -37,7 +37,7 @@ export async function createArenaAction(_prev: FormState, form: FormData): Promi
     });
     if (!parsed.success) return { error: firstIssue(parsed.error) };
     const { arena, apiKey } = await createArena(parsed.data, Date.now(), owner);
-    return { ok: true, slug: arena.slug, token: apiKey.token, keyName: apiKey.name };
+    return { ok: true, slug: arena.slug, token: apiKey.token, keyName: apiKey.name, keyId: apiKey.id };
   });
 }
 

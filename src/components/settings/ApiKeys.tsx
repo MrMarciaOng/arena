@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useActionState, useEffect, useState, useTransition } from "react";
 import type { ApiKeyPublic } from "@/lib/domain";
@@ -107,7 +108,11 @@ export function ApiKeys({ slug, keys }: { slug: string; keys: ApiKeyPublic[] }) 
     <div className="flex flex-col gap-3">
       <p className="text-sm text-muted">
         Agents send a key as <code>Authorization: Bearer &lt;key&gt;</code>. A key works for this arena only. Give each machine or
-        agent its own, so you can revoke one without breaking the rest.
+        agent its own, so you can revoke one without breaking the rest.{" "}
+        <Link href={`/arenas/${slug}/connect`} className="text-done underline underline-offset-4">
+          Connect agents
+        </Link>{" "}
+        gives you a ready-to-paste command for Claude Code, Codex or another AI.
       </p>
       {keys.length === 0 ? (
         <p className="text-sm text-waiting">No keys. Agents can&apos;t report to this arena until you create one.</p>
@@ -134,7 +139,7 @@ export function ApiKeys({ slug, keys }: { slug: string; keys: ApiKeyPublic[] }) 
         </p>
       ) : null}
       {state.ok && state.token && state.slug && keys.some((k) => k.id === state.keyId) ? (
-        <TokenReveal slug={state.slug} token={state.token} note={`Key "${state.keyName}" is ready. You can copy it again here later.`} />
+        <TokenReveal slug={state.slug} token={state.token} keyId={state.keyId} note={`Key "${state.keyName}" is ready. You can copy it again here later.`} />
       ) : null}
     </div>
   );

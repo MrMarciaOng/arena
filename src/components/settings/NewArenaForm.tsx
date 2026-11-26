@@ -29,7 +29,13 @@ function NewArenaFormRound({ onAnother }: { onAnother: () => void }) {
           token={state.token}
           note={`Its first API key is called "${state.keyName}". Copy it now, or later from the arena's Settings.`}
         />
-        <div className="mt-4 flex gap-2">
+        <div className="mt-4 flex flex-wrap gap-2">
+          <Link
+            href={`/arenas/${state.slug}/connect${state.keyId ? `?key=${encodeURIComponent(state.keyId)}` : ""}`}
+            className="pixel-button inline-block border-working text-working"
+          >
+            Connect agents
+          </Link>
           <Link href={`/arenas/${state.slug}`} className="pixel-button inline-block">
             Open the arena
           </Link>

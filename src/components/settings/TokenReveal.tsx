@@ -1,11 +1,12 @@
 "use client";
 
+import Link from "next/link";
 import { useState, useSyncExternalStore } from "react";
 
 const noop = () => () => {};
 
-/** Shows a new API key with a copy button and a ready-to-run curl command. */
-export function TokenReveal({ slug, token, note }: { slug: string; token: string; note?: string }) {
+/** Shows a new API key with a copy button, a ready-to-run curl command and the way to set up agents with it. */
+export function TokenReveal({ slug, token, keyId, note }: { slug: string; token: string; keyId?: string; note?: string }) {
   const origin = useSyncExternalStore(noop, () => window.location.origin, () => "http://localhost:3000");
   const [copyResult, setCopyResult] = useState<{ item: "key" | "command"; copied: boolean } | null>(null);
   const curl = `curl -X POST ${origin}/api/arenas/${slug}/agents/my-agent/status \\
@@ -47,6 +48,13 @@ export function TokenReveal({ slug, token, note }: { slug: string; token: string
           className="mt-1 w-full bg-ink font-mono text-xs"
         />
       ) : <pre className="mt-1 overflow-x-auto text-xs">{curl}</pre>}
+      {keyId ? (
+        <p className="mt-3">
+          <Link href={`/arenas/${slug}/connect?key=${encodeURIComponent(keyId)}`} className="text-done underline underline-offset-4">
+            Connect Claude Code, Codex or another AI with this key
+          </Link>
+        </p>
+      ) : null}
       <p role="status" className="mt-1 text-xs text-muted">
         {copyResult?.copied ? (copyResult.item === "key" ? "API key copied." : "Command copied.") : copyResult
           ? (copyResult.item === "key" ? "Select the key and copy it manually." : "Select the command and copy it manually.")

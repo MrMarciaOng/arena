@@ -125,6 +125,9 @@ export function ArenaView({ slug }: { slug: string }) {
               </button>
             ))}
           </div>
+          <Link href={`/arenas/${arena.slug}/connect`} className="text-sm text-muted underline underline-offset-4 hover:text-text">
+            Connect agents
+          </Link>
           <Link href={`/arenas/${arena.slug}/settings`} className="text-sm text-muted underline underline-offset-4 hover:text-text">
             Settings
           </Link>
@@ -210,9 +213,9 @@ export function ArenaView({ slug }: { slug: string }) {
               {agents.length === 0 ? (
                 <div className="space-y-2 text-sm text-muted">
                   <p>No agents in this arena yet.</p>
-                  <p>Agents appear after their first report.</p>
-                  <Link href={`/arenas/${arena.slug}/settings#api-keys`} className="text-done underline underline-offset-4">
-                    Go to API keys
+                  <p>Agents appear after their first report. Set up Claude Code, Codex or another AI to report here.</p>
+                  <Link href={`/arenas/${arena.slug}/connect`} className="pixel-button inline-block text-text">
+                    Connect an agent
                   </Link>
                 </div>
               ) : matching.length === 0 ? (

@@ -83,9 +83,9 @@ test("count shortcuts focus the filtered roster and List is remembered per arena
   await page.goto("/arenas/unvisited");
   await expect(page.getByRole("button", { name: "scene", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(roster.getByText("Agents appear after their first report.")).toBeVisible();
-  await roster.getByRole("link", { name: "Go to API keys" }).click();
-  await expect(page).toHaveURL(/\/arenas\/unvisited\/settings#api-keys$/);
-  await expect(page.locator("#api-keys")).toBeVisible();
+  await roster.getByRole("link", { name: "Connect an agent" }).click();
+  await expect(page).toHaveURL(/\/arenas\/unvisited\/connect$/);
+  await expect(page.getByRole("heading", { name: "Connect agents" })).toBeVisible();
 });
 
 test("overview and arena can retry an initially rejected stream", async ({ page, request }) => {

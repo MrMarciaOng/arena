@@ -141,6 +141,7 @@ All JSON. Errors look like `{ "error": { "code": "validation_failed", "message":
 | GET | `/api/arenas/:slug/events` | read | history, `?agent=&before=&limit=` (cursor on `id`, newest first) |
 | GET | `/api/stream` | owner / admin | SSE over accessible arenas. Filter with `?arenas=career,personal` |
 | GET | `/api/cron/maintenance` | `CRON_SECRET` bearer | daily cleanup, called by Vercel Cron |
+| GET | `/api/connect/:file` | none | the installer (`install.js`, with this site's URL filled in) and the files it installs: `arena-report.mjs`, `arena-hook.mjs`, `arena-notify.mjs`, `SKILL.md`, `setup.md`. Plain text, no secrets, fixed allowlist |
 
 `slug` and `key` match `^[a-z0-9][a-z0-9._-]{0,63}$`. The slug `new` is reserved, because `/arenas/new` is the creation page.
 
@@ -180,6 +181,7 @@ On every reconnect (EventSource's own, or after `reconnect`), the client replace
 - **`/arenas/[slug]`**: the scene, plus a side panel grouped as *Needs you · Working · Waiting · Done · Error · Idle*. Away agents stay in their group, dimmed, with "last seen"; `working` + away shows **Stalled?**. A **Scene / List** toggle; the list view is the accessible fallback and is better with many agents.
 - **Agent drawer** (opened by clicking a sprite or a list row): status, activity, how long it has been in this state, the sanitized markdown answer with a copy button (and a "truncated" notice when needed), and an event timeline. Owner action: **Acknowledge**, which sets a `done` agent back to `idle` once you've read it. The action sends the `version` the drawer is showing and only applies if the agent is still at that version. If a newer answer arrived while the drawer was open, it is not cleared, and the drawer shows "New answer arrived" instead.
 - **`/arenas/[slug]/settings`**: rename, change theme; API keys (create named keys, copy any key again, revoke one, with a ready-made curl snippet); remove agents.
+- **`/arenas/[slug]/connect`** (owner only): pick a key, pick a tool (Claude Code, Codex, any AI assistant, shell and cron), and copy a ready-filled install command or prompt. Snippets show the key masked; **Copy** uses the real one, fetched on demand. A live line shows agents arriving. See [CONNECT_PLAN.md](CONNECT_PLAN.md).
 - **`/arenas/new`**.
 - **`/login`**: the password form, or in Supabase mode the email form. Once a link is sent, the form becomes a "check your inbox" view with a resend countdown, and the waiting tab moves on when the link signs that browser in. The emailed link lands on the route handler `/auth/confirm`.
 
@@ -219,6 +221,7 @@ src/
     arenas/new/page.tsx
     arenas/[slug]/page.tsx           # scene + panel
     arenas/[slug]/settings/page.tsx
+    arenas/[slug]/connect/page.tsx   # ready-to-paste setup for Claude Code, Codex, any AI, scripts
     api/health/route.ts
     api/stream/route.ts
     api/arenas/route.ts
@@ -230,6 +233,7 @@ src/
     api/arenas/[slug]/agents/[key]/heartbeat/route.ts
     api/arenas/[slug]/events/route.ts
     api/cron/maintenance/route.ts    # daily cleanup (Vercel Cron)
+    api/connect/[file]/route.ts      # the installer and the files it installs
   proxy.ts                           # page-only login redirect
   server/
     env.ts                           # zod-validated env, fail fast
@@ -258,6 +262,7 @@ scripts/
   simulate.ts                        # fake agents cycling through states
   migrate.ts                         # create/upgrade the database
   arena-report.mjs                   # CLI reporter (Node, no dependencies)
+  arena-install.cjs                  # installer the Connect page's commands pipe into `node -`
   install-skill.sh                   # links the skill into Claude Code and Codex
   smoke-api.sh                       # curl walk-through of the API
 examples/

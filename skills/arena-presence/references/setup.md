@@ -16,7 +16,7 @@ EOF
 chmod 600 ~/.config/arena/env
 ```
 
-The key comes from the arena's **Settings** page in Arena, under **API keys**. Give each machine or tool its own named key (for example `laptop-claude`) and use **Copy**; keys can be copied again later and revoked one at a time. The reporter warns if the file is readable by other users.
+The quickest fix: the arena's **Connect agents** page in Arena gives a one-line command that writes this file and installs the integrations. To do it by hand, the key comes from the arena's **Settings** page, under **API keys**. Give each machine or tool its own named key (for example `laptop-claude`) and use **Copy**; keys can be copied again later and revoked one at a time. The reporter warns if the file is readable by other users.
 
 Never put the key in a file that gets committed, such as a project's shared `.claude/settings.json`.
 

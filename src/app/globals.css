@@ -152,7 +152,8 @@ main:has(> [data-workspace-page]) {
   color: var(--color-muted);
 }
 .workspace-view-button:hover,
-.workspace-view-button[aria-pressed="true"] {
+.workspace-view-button[aria-pressed="true"],
+.workspace-view-button[aria-selected="true"] {
   border-color: var(--color-line);
   background: var(--color-panel-2);
   color: var(--color-text);
