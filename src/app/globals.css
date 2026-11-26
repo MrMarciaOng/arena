@@ -348,3 +348,79 @@ span.scene-agent {
     animation: none;
   }
 }
+
+/* ---------- 3D voxel island overlay (1:1 CSS pixels on warm diorama backdrop) ---------- */
+.scene-island .scene-agent-3d {
+  border-radius: 4px;
+}
+.scene-island .scene-agent-3d:hover,
+.scene-island .scene-agent-3d:focus-visible,
+.scene-island .scene-agent-3d.is-selected {
+  /* Above every projected depth (up to about 3,000 for a full arena); the container isolates it within the scene. */
+  z-index: 10000 !important;
+}
+/* Hidden until the engine has placed them, so they never flash at the top-left corner. */
+.scene-island .scene-agent-3d:not([data-projected]),
+.scene-island .scene-nameplate-3d:not([data-projected]) {
+  visibility: hidden;
+}
+.scene-island .scene-agent-3d:focus-visible,
+.scene-island .scene-agent-3d.is-selected {
+  outline: 2px solid #14121f;
+  outline-offset: 2px;
+  box-shadow: 0 0 0 4px #ffffffcc;
+}
+.scene-island .scene-agent-3d .scene-nameplate,
+.scene-island .scene-nameplate-3d {
+  top: calc(100% + 4px);
+  max-width: 112px;
+  padding: 2px 6px 3px;
+  border-width: 1.5px;
+  border-radius: 3px;
+  font: 700 11px/13px var(--font-sans), system-ui, sans-serif;
+  box-shadow: 0 2px 5px #14121f40;
+}
+.scene-island .scene-nameplate-3d {
+  left: 0;
+  top: 0;
+}
+.scene-island .scene-agent-3d .scene-bubble {
+  bottom: calc(100% + 6px);
+  min-width: 19px;
+  height: 19px;
+  padding: 0 4px;
+  border-width: 2px;
+  border-radius: 3px;
+  font: 700 12px/15px var(--font-pixel), monospace;
+  box-shadow: 0 2px 4px #14121f38;
+}
+.scene-island .scene-agent-3d .scene-progress {
+  left: 50%;
+  bottom: calc(100% + 2px);
+  width: 34px;
+  height: 4px;
+  transform: translateX(-50%);
+  border-radius: 2px;
+  overflow: hidden;
+  box-shadow: 0 1px 2px #14121f45;
+}
+.scene-island .scene-agent-3d .scene-caption {
+  bottom: calc(100% + 30px);
+  max-width: 190px;
+  padding: 4px 7px;
+  border-radius: 3px;
+  font: 600 11px/14px var(--font-sans), system-ui, sans-serif;
+  box-shadow: 0 3px 8px #14121f55;
+}
+.scene-island-thumb .scene-agent-3d .scene-bubble {
+  bottom: calc(100% + 4px);
+  min-width: 14px;
+  height: 14px;
+  padding: 0 2px;
+  border-width: 1.5px;
+  font: 700 9px/11px var(--font-pixel), monospace;
+}
+.scene-island-thumb .scene-agent-3d .scene-progress {
+  width: 22px;
+  height: 3px;
+}

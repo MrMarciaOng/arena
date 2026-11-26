@@ -55,4 +55,20 @@ export const KITCHEN: ThemeLayout = {
   },
 };
 
-export const LAYOUTS: Record<ThemeId, ThemeLayout> = { office: OFFICE, kitchen: KITCHEN };
+export const ISLAND: ThemeLayout = {
+  ...ROOM,
+  id: "island",
+  name: "Island",
+  copy: {
+    idle: "Surveying the plot",
+    working: "Laying bricks",
+    waiting: "Resting by the pond",
+    needsYou: "Needs you",
+    done: "Topped out!",
+    error: "Structural snag",
+    away: "Off site",
+    stalled: "Stalled?",
+  },
+};
+
+export const LAYOUTS: Record<ThemeId, ThemeLayout> = { office: OFFICE, kitchen: KITCHEN, island: ISLAND };

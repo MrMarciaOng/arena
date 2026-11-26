@@ -19,7 +19,7 @@ A Next.js web app that shows your AI agents as pixel-art characters in 2D workpl
 
 - **Art style:** "accelerated art" is read as **pixel art** (low-resolution sprites scaled up with crisp pixels).
 - **Hosting:** Vercel (serverless functions) with Supabase as a PostgreSQL server. Local development connects to a Supabase development database. Automated tests use PGlite, an embedded Postgres.
-- **Themes for v1:** `office` and `kitchen`.
+- **Themes:** `office`, `kitchen`, and `island` (an isometric 3D voxel floating-island diorama; see `docs/ISLAND_PLAN.md`).
 
 ---
 
@@ -44,7 +44,7 @@ Next 16 notes: `middleware.ts` is now `proxy.ts`. Route handler `params` is a `P
 ## Domain model
 
 ### Arena
-A workplace. Fields: `id`, `slug` (URL-safe, unique), `name`, `theme` (`office` | `kitchen`), `ownerUserId` (the Supabase account that owns it; null for an arena without one), `version`, timestamps.
+A workplace. Fields: `id`, `slug` (URL-safe, unique), `name`, `theme` (`office` | `kitchen` | `island`), `ownerUserId` (the Supabase account that owns it; null for an arena without one), `version`, timestamps.
 
 ### API key
 An arena has any number of **named API keys** (for example `default`, `laptop`, `claude-hooks`); agents send one as `Authorization: Bearer <key>`. Fields: `id`, `arenaId`, `name` (unique in the arena), `tokenHash` (SHA-256, how requests are matched), `tokenSealed` (the key encrypted with AES-256-GCM under `ARENA_ENCRYPTION_KEY`, or `ARENA_SESSION_SECRET` when that isn't set), `prefix` (first characters, for telling keys apart), `createdAt`, `lastUsedAt` (updated at most once a minute). The owner can **copy a key again at any time**; a copy of the database file alone doesn't reveal keys. A key with no sealed copy (made before sealing existed, or with no secret configured, or after the secret changed) still works but can't be shown again. Revoking one key leaves the others working. A new arena starts with one key named `default`; at most 50 keys per arena.

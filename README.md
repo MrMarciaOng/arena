@@ -1,6 +1,6 @@
 # Arena
 
-A pixel-art dashboard for your AI agents. Each **arena** is a workplace (a "Career" office, a "Personal" kitchen, ...). Agents report over HTTP whether they are working, waiting or done, and the dashboard shows it live: who is busy, who is waiting on you, and what they produced.
+A pixel-art dashboard for your AI agents. Each **arena** is a workplace (a "Career" office, a "Personal" kitchen, a voxel "Island", ...). Agents report over HTTP whether they are working, waiting or done, and the dashboard shows it live: who is busy, who is waiting on you, and what they produced.
 
 The design, the full endpoint list and how it runs in production are in [docs/PLAN.md](docs/PLAN.md).
 

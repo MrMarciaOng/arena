@@ -1,29 +1,28 @@
 "use client";
 
-import { useEffect, useId, useLayoutEffect, useMemo, useRef, useState, useSyncExternalStore, type CSSProperties } from "react";
-import { groupOf, presenceOf, type AgentPublic, type ThemeId } from "@/lib/domain";
-import { plainText, since } from "@/lib/format";
+import dynamic from "next/dynamic";
+import { Component, useEffect, useId, useLayoutEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import type { AgentPublic, ThemeId } from "@/lib/domain";
 import { paletteFor } from "@/lib/palette";
-import { GROUP_COLOR } from "@/components/status";
 import { layoutScene, sceneHeight, seatPoint } from "./layout";
+import { AgentMarkers, describe, useReducedMotion } from "./shared";
 import { spriteSheet } from "./sprites";
 import { backgroundUrl, STATION_H, STATION_W, stationUrl, type StationVariant } from "./themes/art";
-import { LAYOUTS } from "./themes/layouts";
-import type { BubbleKind, Placement, ThemeLayout } from "./types";
+import { ISLAND, LAYOUTS } from "./themes/layouts";
+import type { Placement } from "./types";
 
-function subscribeReducedMotion(onChange: () => void) {
-  const query = window.matchMedia("(prefers-reduced-motion: reduce)");
-  query.addEventListener("change", onChange);
-  return () => query.removeEventListener("change", onChange);
-}
+export { useReducedMotion };
 
-export function useReducedMotion(): boolean {
-  return useSyncExternalStore(
-    subscribeReducedMotion,
-    () => window.matchMedia("(prefers-reduced-motion: reduce)").matches,
-    () => false,
-  );
-}
+const IslandScene = dynamic(() => import("./island/IslandScene").then((m) => m.IslandScene), {
+  ssr: false,
+  loading: () => (
+    <div
+      className="w-full rounded"
+      style={{ background: "#eeebe5", aspectRatio: `${ISLAND.width} / ${ISLAND.baseHeight}` }}
+      aria-hidden
+    />
+  ),
+});
 
 function useFitScale(baseWidth: number, interactive: boolean) {
   const ref = useRef<HTMLDivElement>(null);
@@ -45,53 +44,9 @@ const WALK_MS = 900;
 const ROOM_DESTINATIONS: Record<ThemeId, readonly [string, string]> = {
   office: ["Workstations", "Coffee corner"],
   kitchen: ["Prep stations", "Kitchen pass"],
+  island: ["Build plots", "Pond plaza"],
 };
 const roomJumpButton = "min-h-11 rounded border border-line bg-panel-2 px-2 text-sm text-text hover:border-muted focus-visible:outline-2 focus-visible:outline-done";
-
-const BUBBLE: Record<BubbleKind, { text: string; color: string }> = {
-  dots: { text: "…", color: "var(--color-waiting)" },
-  alert: { text: "!", color: "var(--color-needs-you)" },
-  check: { text: "✓", color: "var(--color-done)" },
-  error: { text: "!", color: "var(--color-error)" },
-  question: { text: "?", color: "var(--color-waiting)" },
-};
-
-function Bubble({ kind, pulse }: { kind: BubbleKind; pulse: boolean }) {
-  const b = BUBBLE[kind];
-  return (
-    <span
-      aria-hidden
-      className={`scene-bubble ${pulse ? "animate-blink" : ""}`}
-      style={{ borderColor: b.color, color: b.color }}
-    >
-      {b.text}
-    </span>
-  );
-}
-
-/** The one line of detail that matters for the agent's status. */
-function detailOf(agent: AgentPublic): string | null {
-  switch (agent.status) {
-    case "waiting":
-      return agent.waitingFor ?? agent.activity;
-    case "error":
-      return agent.error ?? agent.activity;
-    case "done":
-      return (agent.resultPreview && plainText(agent.resultPreview)) || agent.activity;
-    default:
-      return agent.activity;
-  }
-}
-
-function describe(agent: AgentPublic, theme: ThemeLayout, nowMs: number): string {
-  const away = nowMs > 0 && presenceOf(agent, nowMs) === "away";
-  const state = groupOf(agent) === "needsYou" ? theme.copy.needsYou : theme.copy[agent.status];
-  const presence = away
-    ? ` (${agent.status === "working" ? theme.copy.stalled : theme.copy.away}, last seen ${since(agent.lastSeenAt, nowMs)})`
-    : "";
-  const detail = detailOf(agent);
-  return `${agent.displayName}: ${state}${presence}${detail ? ` · ${detail}` : ""}`;
-}
 
 function AgentSprite({
   placement,
@@ -138,8 +93,6 @@ function AgentSprite({
   const sheet = useMemo(() => spriteSheet(palette), [paletteKey]);
   const animation = sheet.animations[pose];
   const Tag = interactive ? "button" : "span";
-  const caption = detailOf(agent);
-  const accent = GROUP_COLOR[groupOf(agent)];
 
   return (
     <Tag
@@ -175,24 +128,14 @@ function AgentSprite({
           } as CSSProperties
         }
       />
-      {placement.bubble && !walking ? (
-        <Bubble kind={placement.bubble} pulse={!reducedMotion && (placement.bubble === "alert" || placement.bubble === "check")} />
-      ) : null}
-      {placement.progress !== null && !walking ? (
-        <span className="scene-progress" aria-hidden>
-          <span style={{ width: `${Math.round(placement.progress * 100)}%` }} />
-        </span>
-      ) : null}
-      {interactive ? (
-        <span className="scene-nameplate" style={{ borderColor: accent }} aria-hidden>
-          <span>{agent.displayName}</span>
-        </span>
-      ) : null}
-      {interactive && caption ? (
-        <span className="scene-caption" aria-hidden>
-          {caption}
-        </span>
-      ) : null}
+      <AgentMarkers
+        agent={agent}
+        bubble={placement.bubble}
+        progress={placement.progress}
+        walking={walking}
+        reducedMotion={reducedMotion}
+        interactive={interactive}
+      />
     </Tag>
   );
 }
@@ -203,15 +146,7 @@ function stationVariant(agent: AgentPublic | undefined): StationVariant {
   return "plain";
 }
 
-export function Scene({
-  themeId,
-  agents,
-  nowMs,
-  selectedKey = null,
-  onSelect,
-  interactive = true,
-  maxHeight,
-}: {
+type SceneProps = {
   themeId: ThemeId;
   agents: AgentPublic[];
   nowMs: number;
@@ -220,7 +155,51 @@ export function Scene({
   interactive?: boolean;
   /** Crop the view to this many logical pixels (thumbnails); the scene itself is unchanged. */
   maxHeight?: number;
-}) {
+};
+
+/** Shows the 2D scene if the 3D island fails to render, e.g. its chunk is gone after a deploy. */
+class IslandBoundary extends Component<{ fallback: ReactNode; children: ReactNode }, { failed: boolean }> {
+  state = { failed: false };
+
+  static getDerivedStateFromError() {
+    return { failed: true };
+  }
+
+  render() {
+    return this.state.failed ? this.props.fallback : this.props.children;
+  }
+}
+
+export function Scene(props: SceneProps) {
+  if (props.themeId === "island") {
+    // The pixel room is the island's fallback wherever WebGL or the 3D code is unavailable.
+    const flat = <PixelScene {...props} />;
+    return (
+      <IslandBoundary fallback={flat}>
+        <IslandScene
+          agents={props.agents}
+          nowMs={props.nowMs}
+          selectedKey={props.selectedKey}
+          onSelect={props.onSelect}
+          interactive={props.interactive}
+          maxHeight={props.maxHeight}
+          fallback={flat}
+        />
+      </IslandBoundary>
+    );
+  }
+  return <PixelScene {...props} />;
+}
+
+function PixelScene({
+  themeId,
+  agents,
+  nowMs,
+  selectedKey = null,
+  onSelect,
+  interactive = true,
+  maxHeight,
+}: SceneProps) {
   const theme = LAYOUTS[themeId];
   const reducedMotion = useReducedMotion();
   const { ref, scale, canPan } = useFitScale(theme.width, interactive);

@@ -6,7 +6,7 @@ export type Status = (typeof STATUSES)[number];
 export const WAITING_ON = ["human", "agent", "external"] as const;
 export type WaitingOn = (typeof WAITING_ON)[number];
 
-export const THEMES = ["office", "kitchen"] as const;
+export const THEMES = ["office", "kitchen", "island"] as const;
 export type ThemeId = (typeof THEMES)[number];
 
 export const EVENT_TYPES = [
