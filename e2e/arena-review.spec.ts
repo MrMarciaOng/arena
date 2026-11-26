@@ -189,7 +189,12 @@ test("a stream sign-in redirect preserves the agent link and the rest of the URL
   await createArena(request, "session-return");
   await report(request, "session-return", "writer", { status: "working", displayName: "Writer" });
   await login(page);
-  await page.route("**/api/stream**", (route) => route.fulfill({ status: 401 }));
+  // The stream refuses because the session has expired, so the cookie is gone too (otherwise the
+  // login page, seeing a valid session, sends the browser straight back).
+  await page.route("**/api/stream**", async (route) => {
+    await page.context().clearCookies();
+    await route.fulfill({ status: 401 });
+  });
   await page.goto("/arenas/session-return?agent=writer&from=overview#task");
   await expect(page).toHaveURL(/\/login\?next=/);
   const loginUrl = new URL(page.url());
