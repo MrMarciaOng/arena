@@ -52,3 +52,18 @@ export async function readConnectFile(name: string, origin: string): Promise<str
   const text = await file.read();
   return file.transform ? file.transform(text, origin) : text;
 }
+
+const HOST_RE = /^[A-Za-z0-9.-]+(:\d{1,5})?$/;
+const first = (value: string | null) => value?.split(",")[0]?.trim() || null;
+
+/**
+ * The origin the caller asked for, which the installer saves and calls back. Behind a proxy, or
+ * under `next start`, req.url can name the server's own address (localhost) instead.
+ */
+export function publicOrigin(req: Request): string {
+  const url = new URL(req.url);
+  const host = first(req.headers.get("x-forwarded-host")) ?? req.headers.get("host");
+  const proto = first(req.headers.get("x-forwarded-proto")) ?? url.protocol.slice(0, -1);
+  if (host && HOST_RE.test(host) && (proto === "https" || proto === "http")) return `${proto}://${host}`;
+  return url.origin;
+}

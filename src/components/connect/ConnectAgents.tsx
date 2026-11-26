@@ -32,12 +32,8 @@ import { useLiveStream, useNow } from "../live/useLiveStream";
 import { inputClass } from "../settings/NewArenaForm";
 
 const noop = () => () => {};
-const SUGGESTED_KEY_NAME: Record<ConnectTool, string> = {
-  claude: "claude-code",
-  codex: "codex",
-  assistant: "assistant",
-  shell: "scripts",
-};
+/** Everything of Arena's on one machine shares the key installed last, so keys go per machine (or per AI service). */
+const suggestedKeyName = (tool: ConnectTool) => (tool === "assistant" ? "assistant" : "my-computer");
 
 function defaultKeyId(keys: ApiKeyPublic[], wanted: string | null): string | null {
   const copyable = keys.filter((k) => k.copyable);
@@ -124,6 +120,7 @@ export function ConnectAgents({
   const [tool, setTool] = useState<ConnectTool>("claude");
   const [creating, startCreate] = useTransition();
   const [createError, setCreateError] = useState<string | null>(null);
+  const [keyName, setKeyName] = useState<string | null>(null);
   const tabRefs = useRef<(HTMLButtonElement | null)[]>([]);
   const ids = useId();
 
@@ -146,6 +143,16 @@ export function ConnectAgents({
     };
   }, [keyId, slug, tokens, tokenErrors]);
 
+  /** Choosing a key again retries one that failed to load. */
+  function chooseKey(id: string) {
+    setTokenErrors((errors) => {
+      const rest = { ...errors };
+      delete rest[id];
+      return rest;
+    });
+    setKeyId(id);
+  }
+
   function createKey(form: FormData) {
     startCreate(async () => {
       const result = await createKeyAction({}, form);
@@ -153,6 +160,7 @@ export function ConnectAgents({
         setTokens((t) => ({ ...t, [result.keyId!]: result.token! }));
         setKeyId(result.keyId);
         setCreateError(null);
+        setKeyName(null);
         router.refresh();
       } else {
         setCreateError(result.error ?? "Couldn't create the key.");
@@ -195,7 +203,9 @@ export function ConnectAgents({
   const installNote = (
     <Note>
       Run it in a terminal on macOS or Linux (on Windows, in WSL). It needs Node.js 18 or newer, saves the key in{" "}
-      <code>~/.config/arena/env</code> where only you can read it, and backs up any settings file before changing it.{" "}
+      <code>~/.config/arena/env</code> where only you can read it, and keeps a copy of any settings file it changes.
+      Everything of Arena&apos;s on the machine shares that one key. The command holds the key, so your shell history
+      keeps a copy too.{" "}
       <a href={installer} target="_blank" rel="noreferrer" className="underline">
         Read the installer
       </a>{" "}
@@ -210,8 +220,8 @@ export function ConnectAgents({
           1. Choose a key
         </h2>
         <p className="mb-3 text-sm text-muted">
-          The commands below use this key. Give each machine or tool its own, so you can revoke one without breaking the
-          rest.
+          The commands below use this key. Give each computer its own, and each AI service you paste one into, so you can
+          revoke one without breaking the rest.
         </p>
         {copyable.length === 0 ? (
           <p className="mb-3 text-sm text-waiting">This arena has no key that can be copied. Create one to continue.</p>
@@ -231,7 +241,7 @@ export function ConnectAgents({
                   value={k.id}
                   checked={k.id === keyId}
                   disabled={!k.copyable}
-                  onChange={() => setKeyId(k.id)}
+                  onChange={() => chooseKey(k.id)}
                 />
                 <span className="font-semibold">{k.name}</span>
                 <code className="text-xs text-muted">{k.prefix}</code>
@@ -246,25 +256,38 @@ export function ConnectAgents({
             ))}
           </fieldset>
         ) : null}
-        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs" role="status">
-          {keyId && tokenErrors[keyId] ? (
-            <span className="text-error">{tokenErrors[keyId]}</span>
-          ) : keyId && !realToken ? (
-            <span className="text-muted">Loading the key…</span>
-          ) : realToken ? (
-            <>
+        <div className="mt-2 flex flex-wrap items-center gap-3 text-xs">
+          <span role="status">
+            {keyId && tokenErrors[keyId] ? (
+              <span className="text-error">{tokenErrors[keyId]}</span>
+            ) : keyId && !realToken ? (
+              <span className="text-muted">Loading the key…</span>
+            ) : realToken ? (
               <span className="text-working">Ready: Copy puts the full key in each command.</span>
-              <button type="button" className="underline underline-offset-4" onClick={() => setShowKey((s) => !s)}>
-                {showKey ? "Hide key" : "Show key"}
-              </button>
-            </>
+            ) : null}
+          </span>
+          {keyId && tokenErrors[keyId] ? (
+            <button type="button" className="underline underline-offset-4" onClick={() => chooseKey(keyId)}>
+              Try again
+            </button>
+          ) : realToken ? (
+            <button type="button" className="underline underline-offset-4" onClick={() => setShowKey((s) => !s)}>
+              {showKey ? "Hide key" : "Show key"}
+            </button>
           ) : null}
         </div>
         <form action={createKey} className="mt-4 flex flex-wrap items-end gap-2">
           <input type="hidden" name="slug" value={slug} />
           <label className="flex flex-col gap-1 text-sm">
             New key
-            <input key={tool} name="name" required maxLength={40} defaultValue={SUGGESTED_KEY_NAME[tool]} className={inputClass} />
+            <input
+              name="name"
+              required
+              maxLength={40}
+              value={keyName ?? suggestedKeyName(tool)}
+              onChange={(event) => setKeyName(event.target.value)}
+              className={inputClass}
+            />
           </label>
           <button type="submit" className="pixel-button" disabled={creating}>
             {creating ? "Creating…" : "Create key"}
@@ -305,13 +328,13 @@ export function ConnectAgents({
         <div role="tabpanel" id={`${ids}-panel`} aria-labelledby={`${ids}-tab-${tool}`} className="flex flex-col gap-5">
           {tool === "claude" ? (
             <>
-              <CopyBlock id="claude-skill" title="Let Claude report for itself (recommended)" snippet={snippet((v) => installCommand(v, ["skill"]))}>
+              <CopyBlock key="claude-skill" id="claude-skill" title="Let Claude report for itself (recommended)" snippet={snippet((v) => installCommand(v, ["skill"]))}>
                 <Note>
                   Installs the <code>arena-presence</code> skill. Claude keeps its own card current: what it&apos;s working
                   on, how far along it is, when it needs you, and its answer when it&apos;s done.
                 </Note>
               </CopyBlock>
-              <CopyBlock id="claude-hooks" title="Or report every session automatically" snippet={snippet((v) => installCommand(v, ["claude-hooks"]))}>
+              <CopyBlock key="claude-hooks" id="claude-hooks" title="Or report every session automatically" snippet={snippet((v) => installCommand(v, ["claude-hooks"]))}>
                 <Note>
                   Adds hooks to <code>~/.claude/settings.json</code>. Every session shows your prompt while it works,{" "}
                   <strong>Needs you</strong> at permission prompts, and Claude&apos;s last message when it stops. Claude
@@ -322,7 +345,7 @@ export function ConnectAgents({
             </>
           ) : tool === "codex" ? (
             <>
-              <CopyBlock id="codex" title="Install the skill and Codex's notify" snippet={snippet((v) => installCommand(v, ["skill", "codex"]))}>
+              <CopyBlock key="codex" id="codex" title="Install the skill and Codex's notify" snippet={snippet((v) => installCommand(v, ["skill", "codex"]))}>
                 <Note>
                   The skill lets Codex report for itself while it works, and <code>notify</code> in{" "}
                   <code>~/.codex/config.toml</code> reports each finished turn with its answer. Codex runs only one notify
@@ -333,7 +356,7 @@ export function ConnectAgents({
               {installNote}
             </>
           ) : tool === "assistant" ? (
-            <CopyBlock id="assistant" title="Paste this into your AI assistant" snippet={snippet(assistantPrompt)}>
+            <CopyBlock key="assistant" id="assistant" title="Paste this into your AI assistant" snippet={snippet(assistantPrompt)}>
               <Note>
                 For assistants that can run commands or make web requests, such as Cursor, Windsurf, ChatGPT in agent mode,
                 or your own agents. No install needed. A chat that can&apos;t reach the internet can&apos;t report.
@@ -345,14 +368,14 @@ export function ConnectAgents({
             </CopyBlock>
           ) : (
             <>
-              <CopyBlock id="reporter" title="Install the reporter" snippet={snippet((v) => installCommand(v, ["reporter"]))}>
+              <CopyBlock key="reporter" id="reporter" title="Install the reporter" snippet={snippet((v) => installCommand(v, ["reporter"]))}>
                 <Note>
                   Puts <code>arena-report.mjs</code> in <code>~/.config/arena/bin</code>. It never fails the job that
                   calls it, and never prints the key.
                 </Note>
               </CopyBlock>
-              <CopyBlock id="reporter-examples" title="Then report from any script or cron job" snippet={plain(reporterExamples())} />
-              <CopyBlock id="curl" title="Or call the API directly" snippet={snippet((v) => curlExample(v))}>
+              <CopyBlock key="reporter-examples" id="reporter-examples" title="Then report from any script or cron job" snippet={plain(reporterExamples())} />
+              <CopyBlock key="curl" id="curl" title="Or call the API directly" snippet={snippet((v) => curlExample(v))}>
                 <Note>
                   The first report adds the agent. Statuses: <code>idle</code>, <code>working</code> (
                   <code>activity</code>, <code>progress</code> 0–1), <code>waiting</code> (<code>waitingOn</code>:{" "}
@@ -394,7 +417,7 @@ export function ConnectAgents({
           <details className="text-xs text-muted">
             <summary className="cursor-pointer">Remove it from this machine later</summary>
             <div className="mt-2">
-              <CopyBlock id="uninstall" title="Uninstall" snippet={plain(uninstallCommand(origin))}>
+              <CopyBlock key="uninstall" id="uninstall" title="Uninstall" snippet={plain(uninstallCommand(origin))}>
                 <Note>
                   Removes the skill, the hooks, Codex&apos;s notify line, the scripts and <code>~/.config/arena/env</code>.
                 </Note>

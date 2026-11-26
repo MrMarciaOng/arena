@@ -4,6 +4,7 @@ import {
   lstatSync,
   mkdirSync,
   mkdtempSync,
+  readdirSync,
   readFileSync,
   rmSync,
   statSync,
@@ -47,6 +48,7 @@ describe("GET /api/connect/:file", () => {
       expect(res.status, file).toBe(200);
       expect(res.headers.get("content-type")).toBe("text/plain; charset=utf-8");
       expect(res.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(res.headers.get("cache-control")).toBe("no-store");
       expect(await res.text()).toBe(text);
     }
   });
@@ -55,6 +57,21 @@ describe("GET /api/connect/:file", () => {
     const text = await (await serve("install.js", "https://arena.example")).text();
     expect(text).toContain(`const SERVED_FROM = "https://arena.example";`);
     expect(text).not.toContain("__ARENA_URL__");
+  });
+
+  it("fills in the origin the caller asked for, behind a proxy too, and only a plain one", async () => {
+    const servedFrom = async (headers: Record<string, string>) => {
+      const req = new Request("http://localhost:3000/api/connect/install.js", { headers });
+      const text = await (await GET(req, { params: Promise.resolve({ file: "install.js" }) })).text();
+      return /const SERVED_FROM = (".*?");/.exec(text)?.[1];
+    };
+    expect(await servedFrom({ "x-forwarded-host": "arena.mycompany.com", "x-forwarded-proto": "https" })).toBe('"https://arena.mycompany.com"');
+    expect(await servedFrom({ "x-forwarded-host": "arena.mycompany.com, inner.proxy", "x-forwarded-proto": "https,http" })).toBe(
+      '"https://arena.mycompany.com"',
+    );
+    expect(await servedFrom({ host: "arena.lan:8443" })).toBe('"http://arena.lan:8443"');
+    expect(await servedFrom({ "x-forwarded-host": 'evil"; process.exit() //' })).toBe('"http://localhost:3000"');
+    expect(await servedFrom({ "x-forwarded-host": "arena.example", "x-forwarded-proto": "file" })).toBe('"http://localhost:3000"');
   });
 
   it("points the hook and notify scripts at the reporter installed beside them", async () => {
@@ -182,11 +199,10 @@ describe("the installer", () => {
     mkdirSync(path.join(home, ".codex"), { recursive: true });
     const settingsFile = path.join(home, ".claude", "settings.json");
     const codexFile = path.join(home, ".codex", "config.toml");
-    writeFileSync(
-      settingsFile,
-      JSON.stringify({ model: "opus", hooks: { Stop: [{ hooks: [{ type: "command", command: "say done" }] }] } }, null, 2),
-    );
-    writeFileSync(codexFile, 'model = "o3"\n\n[tui]\nnotifications = true\n');
+    const originalSettings = JSON.stringify({ model: "opus", hooks: { Stop: [{ hooks: [{ type: "command", command: "say done" }] }] } }, null, 2);
+    const originalToml = 'model = "o3"\n\n[tui]\nnotifications = true\n';
+    writeFileSync(settingsFile, originalSettings);
+    writeFileSync(codexFile, originalToml);
 
     const result = await run(
       "sh",
@@ -224,18 +240,19 @@ describe("the installer", () => {
       expect(settings.hooks.Notification.at(-1).matcher).toBe("permission_prompt|elicitation_dialog");
     };
     checkSettings();
-    expect(existsSync(`${settingsFile}.arena-backup`)).toBe(true);
 
-    // Codex: notify goes in with the top-level keys, above the first table.
+    // Codex: notify goes at the very top, where a key is always top-level.
     const notifyPath = path.join(home, ".config", "arena", "bin", "arena-notify.mjs");
-    const expectedToml = `model = "o3"\n\nnotify = ["node", ${JSON.stringify(notifyPath)}]\n\n[tui]\nnotifications = true\n`;
+    const expectedToml = `notify = ["node", ${JSON.stringify(notifyPath)}]\n\n${originalToml}`;
     expect(read(codexFile)).toBe(expectedToml);
 
-    // Running it again changes nothing.
+    // Running it again changes nothing, and the copies still hold the files from before Arena.
     const again = await install(home, ["skill", "claude-hooks", "codex"]);
     expect(again.code, again.out + again.err).toBe(0);
     checkSettings();
     expect(read(codexFile)).toBe(expectedToml);
+    expect(read(`${settingsFile}.arena-backup`)).toBe(originalSettings);
+    expect(read(`${codexFile}.arena-backup`)).toBe(originalToml);
 
     // The installed hook really reports (it imports the reporter installed beside it).
     const sessionStart = JSON.stringify({ hook_event_name: "SessionStart", session_id: "s-1", cwd: "/work/arena" });
@@ -251,13 +268,13 @@ describe("the installer", () => {
     const codexAgent = await waitFor(async () => (await rows(agents)).find((a) => a.displayName === "Codex · arena"));
     expect(codexAgent.status).toBe("done");
 
-    // Uninstall takes it all back out and leaves everything else.
+    // Uninstall gives both files back byte for byte and drops the copies it no longer needs.
     const removed = await install(home, ["uninstall"]);
     expect(removed.code, removed.err).toBe(0);
-    const settings = readJson(settingsFile);
-    expect(settings.model).toBe("opus");
-    expect(settings.hooks).toEqual({ Stop: [{ hooks: [{ type: "command", command: "say done" }] }] });
-    expect(read(codexFile)).toBe('model = "o3"\n\n[tui]\nnotifications = true\n');
+    expect(read(settingsFile)).toBe(originalSettings);
+    expect(read(codexFile)).toBe(originalToml);
+    expect(existsSync(`${settingsFile}.arena-backup`)).toBe(false);
+    expect(existsSync(`${codexFile}.arena-backup`)).toBe(false);
     expect(existsSync(path.join(home, ".claude", "skills", "arena-presence"))).toBe(false);
     expect(existsSync(path.join(home, ".codex", "skills", "arena-presence"))).toBe(false);
     expect(existsSync(path.join(home, ".config", "arena"))).toBe(false);
@@ -286,10 +303,12 @@ describe("the installer", () => {
     mkdirSync(path.join(home, ".claude"));
     const settingsFile = path.join(home, ".claude", "settings.json");
     writeFileSync(settingsFile, "{ not json");
-    const result = await install(home, ["claude-hooks", "--arena", "career"], { ARENA_TOKEN: apiKey.token });
+    const result = await install(home, ["skill", "claude-hooks", "--arena", "career"], { ARENA_TOKEN: apiKey.token });
     expect(result.code).toBe(1);
-    expect(result.err).toContain("isn't valid JSON, so it was left alone");
+    expect(result.err).toContain("isn't valid JSON, so nothing was changed");
     expect(read(settingsFile)).toBe("{ not json");
+    expect(existsSync(path.join(home, ".config"))).toBe(false);
+    expect(existsSync(path.join(home, ".claude", "skills"))).toBe(false);
   });
 
   it("keeps linked settings files linked, and gives a file back exactly as it was", async () => {
@@ -314,7 +333,85 @@ describe("the installer", () => {
     const removed = await install(home, ["uninstall"]);
     expect(removed.code, removed.err).toBe(0);
     expect(read(path.join(dotfiles, "config.toml"))).toBe('model = "o3"\n');
-    expect(readJson(path.join(dotfiles, "settings.json"))).toEqual({ model: "opus", hooks: {} });
+    expect(read(path.join(dotfiles, "settings.json"))).toBe('{ "model": "opus" }\n');
+    expect(readdirSync(dotfiles).sort()).toEqual(["config.toml", "settings.json"]);
+
+    // A link to a settings file that doesn't exist yet stays a link, and the file appears behind it.
+    const fresh = tempHome();
+    mkdirSync(path.join(fresh, ".claude"));
+    mkdirSync(path.join(fresh, "dotfiles"));
+    symlinkSync(path.join(fresh, "dotfiles", "claude.json"), path.join(fresh, ".claude", "settings.json"));
+    const dangling = await install(fresh, ["claude-hooks", "--arena", "career"], { ARENA_TOKEN: apiKey.token });
+    expect(dangling.code, dangling.out + dangling.err).toBe(0);
+    expect(lstatSync(path.join(fresh, ".claude", "settings.json")).isSymbolicLink()).toBe(true);
+    expect(readJson(path.join(fresh, "dotfiles", "claude.json")).hooks.SessionStart).toHaveLength(1);
+  });
+
+  it("puts notify at the top of config.toml, where an odd file can't swallow it, and takes it back out exactly", async () => {
+    const { apiKey } = await createArena({ slug: "career", name: "Career", theme: "office" }, Date.now());
+    const home = tempHome();
+    mkdirSync(path.join(home, ".codex"));
+    const codexFile = path.join(home, ".codex", "config.toml");
+    const notify = `notify = ["node", ${JSON.stringify(path.join(home, ".config", "arena", "bin", "arena-notify.mjs"))}]`;
+    for (const original of [
+      'matrix = [\n  [1, 2],\n  [3, 4],\n]\n\n[tui]\nnotifications = true\n',
+      '\uFEFF# my settings\r\nmodel = "o3"\r\n',
+      'model = "o3"',
+      "",
+    ]) {
+      writeFileSync(codexFile, original);
+      const result = await install(home, ["codex", "--arena", "career"], { ARENA_TOKEN: apiKey.token });
+      expect(result.code, result.out + result.err).toBe(0);
+      const bom = original.startsWith("\uFEFF") ? "\uFEFF" : "";
+      expect(read(codexFile)).toBe(original === "" ? `${notify}\n` : `${bom}${notify}\n\n${original.slice(bom.length)}`);
+      const removed = await install(home, ["uninstall"]);
+      expect(removed.code, removed.err).toBe(0);
+      expect(read(codexFile)).toBe(original);
+      expect(existsSync(`${codexFile}.arena-backup`)).toBe(false);
+    }
+
+    // A quoted key is still the notify key.
+    writeFileSync(codexFile, '"notify" = ["say", "done"]\n');
+    const quoted = await install(home, ["codex", "--arena", "career"], { ARENA_TOKEN: apiKey.token });
+    expect(quoted.code).toBe(1);
+    expect(quoted.err).toContain("already runs a notify program");
+    expect(read(codexFile)).toBe('"notify" = ["say", "done"]\n');
+  });
+
+  it("keeps the copy from before Arena when the file has changed since, and says so", async () => {
+    const { apiKey } = await createArena({ slug: "career", name: "Career", theme: "office" }, Date.now());
+    const home = tempHome();
+    mkdirSync(path.join(home, ".claude"));
+    const settingsFile = path.join(home, ".claude", "settings.json");
+    writeFileSync(settingsFile, '{ "model": "opus" }\n');
+    expect((await install(home, ["claude-hooks", "--arena", "career"], { ARENA_TOKEN: apiKey.token })).code).toBe(0);
+    writeFileSync(settingsFile, JSON.stringify({ ...readJson(settingsFile), theme: "dark" }));
+    const removed = await install(home, ["uninstall"]);
+    expect(removed.code, removed.err).toBe(0);
+    expect(readJson(settingsFile)).toEqual({ model: "opus", theme: "dark" });
+    expect(removed.out).toContain("kept ~/.claude/settings.json.arena-backup");
+    expect(read(`${settingsFile}.arena-backup`)).toBe('{ "model": "opus" }\n');
+  });
+
+  it("honours CLAUDE_CONFIG_DIR and CODEX_HOME", async () => {
+    const { apiKey } = await createArena({ slug: "career", name: "Career", theme: "office" }, Date.now());
+    const home = tempHome();
+    const dirs = { CLAUDE_CONFIG_DIR: path.join(home, "claude-config"), CODEX_HOME: path.join(home, "codex-home") };
+    mkdirSync(dirs.CLAUDE_CONFIG_DIR);
+    mkdirSync(dirs.CODEX_HOME);
+    const result = await install(home, ["skill", "claude-hooks", "codex", "--arena", "career"], { ARENA_TOKEN: apiKey.token, ...dirs });
+    expect(result.code, result.out + result.err).toBe(0);
+    expect(existsSync(path.join(dirs.CLAUDE_CONFIG_DIR, "skills", "arena-presence", "SKILL.md"))).toBe(true);
+    expect(existsSync(path.join(dirs.CODEX_HOME, "skills", "arena-presence", "SKILL.md"))).toBe(true);
+    expect(readJson(path.join(dirs.CLAUDE_CONFIG_DIR, "settings.json")).hooks.Stop).toHaveLength(1);
+    expect(read(path.join(dirs.CODEX_HOME, "config.toml"))).toContain("arena-notify.mjs");
+    expect(existsSync(path.join(home, ".claude"))).toBe(false);
+    expect(existsSync(path.join(home, ".codex"))).toBe(false);
+
+    const removed = await install(home, ["uninstall"], dirs);
+    expect(removed.code, removed.err).toBe(0);
+    expect(existsSync(path.join(dirs.CLAUDE_CONFIG_DIR, "skills", "arena-presence"))).toBe(false);
+    expect(read(path.join(dirs.CODEX_HOME, "config.toml"))).toBe("");
   });
 
   it("uninstall carries on past a settings file it can't read, and says so", async () => {
@@ -335,21 +432,52 @@ describe("the installer", () => {
     mkdirSync(path.join(home, ".codex"));
     const codexFile = path.join(home, ".codex", "config.toml");
     writeFileSync(codexFile, 'notify = ["say", "done"]\n');
-    const result = await install(home, ["codex", "--arena", "career"], { ARENA_TOKEN: apiKey.token });
+    const result = await install(home, ["skill", "codex", "--arena", "career"], { ARENA_TOKEN: apiKey.token });
     expect(result.code).toBe(1);
     expect(result.err).toContain("already runs a notify program");
     expect(read(codexFile)).toBe('notify = ["say", "done"]\n');
+    expect(existsSync(path.join(home, ".config"))).toBe(false);
+    expect(existsSync(path.join(home, ".codex", "skills"))).toBe(false);
   });
 
-  it("says when the key is wrong, and never prints it", async () => {
-    await createArena({ slug: "career", name: "Career", theme: "office" }, Date.now());
+  it("won't set up Codex where Codex isn't installed", async () => {
+    const { apiKey } = await createArena({ slug: "career", name: "Career", theme: "office" }, Date.now());
+    const home = tempHome();
+    const result = await install(home, ["skill", "codex", "--arena", "career"], { ARENA_TOKEN: apiKey.token });
+    expect(result.code).toBe(1);
+    expect(result.err).toContain("Codex isn't set up on this machine");
+    expect(readdirSync(home)).toEqual([]);
+  });
+
+  it("refuses a wrong key before saving it, keeps a working setup, and never prints the key", async () => {
+    const { apiKey } = await createArena({ slug: "career", name: "Career", theme: "office" }, Date.now());
     const home = tempHome();
     const token = "arena_not-a-real-key-0123456789";
     const result = await install(home, ["reporter", "--arena", "career"], { ARENA_TOKEN: token });
     expect(result.code).toBe(1);
-    expect(result.out).toContain("Arena didn't accept the saved details");
-    expect(result.out).toContain("HTTP 401");
+    expect(result.err).toContain("Arena didn't accept the key");
+    expect(result.err).toContain("HTTP 401");
+    expect(result.err).toContain("nothing was changed");
     expect(`${result.out}${result.err}`).not.toContain(token);
+    expect(readdirSync(home)).toEqual([]);
+
+    const envFile = path.join(home, ".config", "arena", "env");
+    expect((await install(home, ["reporter", "--arena", "career"], { ARENA_TOKEN: apiKey.token })).code).toBe(0);
+    const working = read(envFile);
+    const again = await install(home, ["reporter", "--arena", "career"], { ARENA_TOKEN: token });
+    expect(again.code).toBe(1);
+    expect(read(envFile)).toBe(working);
+  });
+
+  it("says when it points this machine at another arena or key", async () => {
+    const career = await createArena({ slug: "career", name: "Career", theme: "office" }, Date.now());
+    const side = await createArena({ slug: "side", name: "Side", theme: "office" }, Date.now());
+    const home = tempHome();
+    expect((await install(home, ["reporter", "--arena", "career"], { ARENA_TOKEN: career.apiKey.token })).code).toBe(0);
+    const moved = await install(home, ["reporter", "--arena", "side"], { ARENA_TOKEN: side.apiKey.token });
+    expect(moved.code, moved.out + moved.err).toBe(0);
+    expect(moved.out).toContain('in place of "career": everything of Arena\'s on this machine now reports to "side"');
+    expect(read(path.join(home, ".config", "arena", "env"))).toContain("ARENA_SLUG=side\n");
   });
 
   it("refuses bad arguments before changing anything", async () => {

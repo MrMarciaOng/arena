@@ -25,6 +25,10 @@ test("an empty arena leads to Connect agents, whose copied commands carry the re
   await expect(page.getByRole("button", { name: "Copy: Let Claude report for itself (recommended)" })).toHaveText("Copied");
   const skillCommand = await clipboard(page);
   expect(skillCommand).toBe(`curl -fsSL ${baseURL}/api/connect/install.js | ARENA_TOKEN=${apiKey.token} node - skill --arena hookup`);
+  // "Copied" belongs to that one snippet: another tab's button doesn't inherit it.
+  await page.getByRole("tab", { name: "Codex" }).click();
+  await expect(page.getByRole("button", { name: "Copy: Install the skill and Codex's notify" })).toHaveText("Copy");
+  await page.getByRole("tab", { name: "Claude Code" }).click();
 
   // Run it as copied, in a throwaway home: it installs the skill and Arena accepts the saved details.
   const home = mkdtempSync(path.join(os.tmpdir(), "arena-e2e-home-"));

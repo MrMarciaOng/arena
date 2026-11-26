@@ -85,9 +85,9 @@ The commands download the installer from the arena itself (`/api/connect/install
 curl -fsSL https://your-arena/api/connect/install.js | ARENA_TOKEN='arena_…' node - skill --arena career
 ```
 
-- **What it writes.** It saves the URL, slug and key in `~/.config/arena/env` (mode 600), which every integration below reads.
-- **Where things go.** Scripts go in `~/.config/arena/bin`, and the skill in `~/.claude/skills` and `~/.codex/skills`.
-- **Editing settings.** It backs up `~/.claude/settings.json` and `~/.codex/config.toml` before changing them. It leaves other hooks alone, and never replaces another `notify` program.
+- **What it writes.** Once Arena accepts the key, it saves the URL, slug and key in `~/.config/arena/env` (mode 600). Every integration below reads that one file, so installing with another key or arena replaces it for all of them, and the installer says so.
+- **Where things go.** Scripts go in `~/.config/arena/bin`, and the skill in `~/.claude/skills` and `~/.codex/skills` (or under `CLAUDE_CONFIG_DIR` and `CODEX_HOME` when set).
+- **Editing settings.** The first time it changes `~/.claude/settings.json` or `~/.codex/config.toml`, it keeps a copy (`<file>.arena-backup`); uninstall puts the copy back if nothing else in the file has changed. It leaves other hooks alone and never replaces another `notify` program. It checks the key and these files, and downloads everything, before it changes anything.
 - **Commands.** `skill`, `claude-hooks`, `codex` and `reporter` install those integrations; `uninstall` removes everything it added.
 - **Served files.** The same route serves `arena-report.mjs`, `arena-hook.mjs`, `arena-notify.mjs`, `SKILL.md` and `setup.md`. None of them holds a secret.
 
